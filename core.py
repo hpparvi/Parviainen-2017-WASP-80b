@@ -6,7 +6,7 @@ from glob import glob
 from os.path import join, exists
 from numpy.polynomial.chebyshev import Chebyshev
 
-rawdir = '../../../data/gtc_transmission_spectra/GTC9-14A/OB0020/'
+rawdir = '/home/bootha/Project/Parviainen-WASP-80b-Osiris/data/gct_transmission_spectra/OB0020'
 reddir  = 'data'
 
 d_flat = join(rawdir,'flat')
