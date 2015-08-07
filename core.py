@@ -6,13 +6,10 @@ from glob import glob
 from os.path import join, exists
 from numpy.polynomial.chebyshev import Chebyshev
 
-<<<<<<< HEAD
+
 rawdir = '/home/mert3269/soft/Parviainen-WASP-80b-Osiris/data/'
 reddir = '/home/mert3269/soft/Parviainen-WASP-80b-Osiris/data/'
-=======
-rawdir = '/home/bootha/Project/Parviainen-WASP-80b-Osiris/data/gct_transmission_spectra/OB0020'
-reddir  = 'data'
->>>>>>> 883a8263199adf8014049c5a0bbd8e932cc58b0d
+
 
 d_flat = join(rawdir,'flat')
 d_bias = join(rawdir,'bias')
