@@ -3,13 +3,11 @@ import pandas as pd
 import numpy as  np
 
 from glob import glob
+from os import getenv
 from os.path import join, exists
 from numpy.polynomial.chebyshev import Chebyshev
 
-
-rawdir = '/home/mert3269/soft/Parviainen-WASP-80b-Osiris/data/'
-reddir = '/home/mert3269/soft/Parviainen-WASP-80b-Osiris/data/'
-
+rawdir = getenv('W80_DATA_PATH')
 
 d_flat = join(rawdir,'flat')
 d_bias = join(rawdir,'bias')
@@ -20,7 +18,6 @@ l_bias = sorted(glob(join(d_bias,'*.fits')))
 l_obj  = sorted(glob(join(d_obj, '*.fits')))[2:]
 
 bias_window = np.s_[:,50:1035]
-
 ccd1_window = np.s_[:,250:330]
 ccd2_window = np.s_[:,840:890]
 
