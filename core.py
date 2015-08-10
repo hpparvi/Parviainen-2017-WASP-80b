@@ -7,11 +7,12 @@ from os import getenv
 from os.path import join, exists
 from numpy.polynomial.chebyshev import Chebyshev
 
-rawdir = getenv('W80_DATA_PATH')
+d_raw = getenv('W80_DATA_PATH')
+d_res = 'results'
 
-d_flat = join(rawdir,'flat')
-d_bias = join(rawdir,'bias')
-d_obj  = join(rawdir,'object')
+d_flat = join(d_raw,'flat')
+d_bias = join(d_raw,'bias')
+d_obj  = join(d_raw,'object')
 
 l_flat = sorted(glob(join(d_flat,'*.fits')))
 l_bias = sorted(glob(join(d_bias,'*.fits')))
