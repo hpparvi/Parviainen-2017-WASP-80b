@@ -3,8 +3,20 @@ import pandas as pd
 import numpy as  np
 
 from glob import glob
-from os.path import join, exists
+from os.path import join, exists, basename
 from numpy.polynomial.chebyshev import Chebyshev
+
+import sys
+import math as m
+import seaborn as sb
+import pyfits as pf
+
+from matplotlib.dates import datestr2num
+from matplotlib import rc
+from numpy import pi, array, exp, abs, sum
+from scipy.constants import k, G, proton_mass
+
+from exotk.constants import rjup, mjup, rsun, msun
 
 
 rawdir = '/home/mert3269/soft/Parviainen-WASP-80b-Osiris/data/'
@@ -62,3 +74,41 @@ class WhiteFilter(object):
         
     def __call__(self, x):
         return np.sum([f(x) for f in self.filters], 0)
+    
+## Matplotlib configuration
+AAOCW, AAPGW = 3.4645669, 7.0866142
+rc('figure', figsize=(13,5))
+rc(['axes', 'ytick', 'xtick'], labelsize=8)
+rc('font', size=6)
+
+rc_paper = {"lines.linewidth": 1,
+            'ytick.labelsize': 6.5,
+            'xtick.labelsize': 6.5,
+            'axes.labelsize': 6.5,
+            'figure.figsize':(AAOCW,0.65*AAOCW)}
+
+rc_notebook = {'figure.figsize':(13,5)}
+
+sb.set_context('notebook', rc=rc_notebook)
+sb.set_style('white')
+    
+    
+## Color definitions
+##
+c_ob = "#002147" # Oxford blue
+c_bo = "#CC5500" # Burnt orange
+cp = sb.color_palette([c_ob,c_bo], n_colors=2)+sb.color_palette(name='deep',n_colors=4)
+sb.set_palette(cp)
+
+## Potassium and Kalium resonance line centers [nm]
+##
+wlc_k  = array([766.5,769.9])
+wlc_na = array([589.4])
+
+## Narrow-band filters
+##
+pb_centers    = 540. + np.arange(16)*25
+pb_filters_nb = [GeneralGaussian('', c, 12, 20) for c in pb_centers]
+pb_filter_bb  = WhiteFilter('white', pb_filters_nb)
+
+
