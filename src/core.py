@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as  np
 
 from glob import glob
+<<<<<<< HEAD:src/core.py
 from os.path import join, exists, basename
 from numpy.polynomial.chebyshev import Chebyshev
 
@@ -27,13 +28,24 @@ dir_results = '/home/mert3269/soft/Parviainen-WASP-80b-Osiris/results/'
 d_flat = join(rawdir,'flat')
 d_bias = join(rawdir,'bias')
 d_obj  = join(rawdir,'object')
+=======
+from os import getenv
+from os.path import join, exists
+from numpy.polynomial.chebyshev import Chebyshev
+
+d_raw = getenv('W80_DATA_PATH')
+d_res = 'results'
+
+d_flat = join(d_raw,'flat')
+d_bias = join(d_raw,'bias')
+d_obj  = join(d_raw,'object')
+>>>>>>> dc167223fa662ac813f53c97b6bb69808e4604c7:core.py
 
 l_flat = sorted(glob(join(d_flat,'*.fits')))
 l_bias = sorted(glob(join(d_bias,'*.fits')))
 l_obj  = sorted(glob(join(d_obj, '*.fits')))[2:]
 
 bias_window = np.s_[:,50:1035]
-
 ccd1_window = np.s_[:,250:330]
 ccd2_window = np.s_[:,840:890]
 
