@@ -19,10 +19,10 @@ class PE(object):
         msk = array(df_aux.bad_mask, dtype=np.bool)
         
         if ipb is None:
-            self.lpf = LPFM(array(df_aux.mjd-56846+0.5)[msk], array(df_lc)[msk,:], 
+            self.lpf = LPFM(array(df_aux.mjd+0.5)[msk], array(df_lc)[msk,:], 
                                   df_aux.airmass[msk], n_threads)
         else:
-            self.lpf = LPFS(array(df_aux.mjd-56846+0.5)[msk], array(df_lc)[msk,ipb], 
+            self.lpf = LPFS(array(df_aux.mjd+0.5)[msk], array(df_lc)[msk,ipb], 
                                   df_aux.airmass[msk], n_threads, filters=[pb_filters_nb[ipb]])
             
         self.de = DiffEvol(self.lpf, self.lpf.ps.bounds, n_walkers, maximize=True, C=0.85, F=0.25)
@@ -42,7 +42,7 @@ class PE(object):
     def run_mcmc(self, n_iter=2500, thin=50, irun=0, population=None):
         p0 = population if population is not None else self.de.population
         for ismp, e in enumerate(self.sampler.sample(p0, iterations=n_iter, thin=thin)):
-            sys.stdout.write('\r{:2d} -- {:4d}/{:4d}'.format(irun,ismp,n_iter))
+            sys.stdout.write('\r{:2d} -- {:4d}/{:4d}'.format(irun,ismp+1,n_iter))
             sys.stdout.flush()
         print ""
 
@@ -72,10 +72,11 @@ if __name__ == '__main__':
     ap.add_argument('--dont-continue-mc', dest='continue_mc', action='store_false', default=True)
     ap.add_argument('--lc-name', default='final/nb_nomask')
     ap.add_argument('--run-name', default='nomask')
+    ap.add_argument('--noise-model', default='wn', choices=['wn','gp'])
 
     args = ap.parse_args()
-    de_file = join(dir_results,'TrES_3b_color_{:s}_wn_de.npz'.format(args.run_name))
-    mc_file = join(dir_results,'TrES_3b_color_{:s}_wn_mc.npz'.format(args.run_name))
+    de_file = join(dir_results,'WASP_80b_color_{:s}_wn_de.npz'.format(args.run_name))
+    mc_file = join(dir_results,'WASP_80b_color_{:s}_wn_mc.npz'.format(args.run_name))
 
     do_de = args.do_de or not exists(de_file)
     do_mc = args.do_mc or not exists(mc_file)

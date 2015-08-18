@@ -20,10 +20,10 @@ class PE(object):
         msk = array(df_aux.bad_mask, dtype=np.bool)
         
         if ipb is None:
-            self.lpf = LPFM(array(df_aux.mjd-56846+0.5)[msk], array(df_lc)[msk,:], 
+            self.lpf = LPFM(array(df_aux.mjd+0.5)[msk], array(df_lc)[msk,:], 
                                   df_aux.airmass[msk], df_gph, n_threads)
         else:
-            self.lpf = LPFS(array(df_aux.mjd-56846+0.5)[msk], array(df_lc)[msk,ipb], 
+            self.lpf = LPFS(array(df_aux.mjd+0.5)[msk], array(df_lc)[msk,ipb], 
                                   df_aux.airmass[msk], n_threads, filters=[pb_filters_nb[ipb]])
             
         self.de = DiffEvol(self.lpf, self.lpf.ps.bounds, n_walkers, maximize=True, C=0.85, F=0.25)
@@ -71,29 +71,31 @@ if __name__ == '__main__':
     ap.add_argument('--do-de', action='store_true', default=False)
     ap.add_argument('--do-mc', action='store_true', default=False)
     ap.add_argument('--dont-continue-mc', dest='continue_mc', action='store_false', default=True)
-    ap.add_argument('--lc-type', default='nomask')
+    ap.add_argument('--lc-name', default='nomask')
     ap.add_argument('--run-name', default='nomask')
 
     args = ap.parse_args()
-    de_file = join(dir_results,'TrES_3b_color_{:s}_gp_de.npz'.format(args.run_name))
-    mc_file = join(dir_results,'TrES_3b_color_{:s}_gp_mc.npz'.format(args.run_name))
+    de_file = join(dir_results,'WASP_80b_color_{:s}_gp_de.npz'.format(args.run_name))
+    mc_file = join(dir_results,'WASP_80b_color_{:s}_gp_mc.npz'.format(args.run_name))
 
     do_de = args.do_de or not exists(de_file)
     do_mc = args.do_mc or not exists(mc_file)
     continue_mc = args.continue_mc and exists(mc_file)
 
-    pe = PE(args.lc_type, args.n_walkers, n_threads=args.n_threads)
+    pe = PE(args.lc_name, args.n_walkers, n_threads=args.n_threads)
 
     if do_de:
-        pes = [PE(args.lc_type, n_walkers=args.n_walkers, n_threads=args.n_threads, ipb=ipb) for ipb in range(16)]
+        pes = [PE(args.lc_name, n_walkers=args.n_walkers, n_threads=args.n_threads, ipb=ipb) for ipb in range(16)]
         [p.run_de(100) for p in pes]
 
         pe.de._population[:,:4] = pes[0].de.population[:,:4]
         for ipb in range(pe.lpf.npb):
-            pe.de._population[:,4+5*ipb:4+5*(1+ipb)] = pes[ipb].de.population[:,[4,6,7,8,9]]
-        ws = pe.lpf.wn_start
-        for ipb in range(pe.lpf.npb-1):
-            pe.de._population[:,ws+ipb] = pes[ipb].de.population[:,5]
+            pe.de._population[:,4+6*ipb:4+6*(1+ipb)] = pes[ipb].de.population[:,4:]
+            
+            #pe.de._population[:,4+5*ipb:4+5*(1+ipb)] = pes[ipb].de.population[:,[4,6,7,8,9]]
+        #ws = pe.lpf.wn_start
+        #for ipb in range(pe.lpf.npb-1):
+            #pe.de._population[:,ipb] = pes[ipb].de.population[:,5] # with ws population[:,ws+ipb]
 
         pe.run_de(args.de_n_iterations)
         np.savez(de_file, population=pe.de.population, best_fit=pe.de.minimum_location)

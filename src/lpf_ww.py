@@ -12,7 +12,7 @@ from core import *
 
 class LPFunction(object):
     def __init__(self, time, flux, airmass, nthreads=2, filters=None):
-        self.tm = MA(interpolate=True, klims=(0.15,0.20), nthr=nthreads, nk=512) 
+        self.tm = MA(interpolate=True, klims=(0.16,0.19), nthr=nthreads, nk=512) 
         self.nthr = nthreads
 
         self.time     = array(time)       # Mid-exposure times
@@ -25,13 +25,13 @@ class LPFunction(object):
         self.lds = sc.create_profiles(500)
         self.lds.resample_linear_z()
         
-        self.priors = [UP(  0.605,   0.615,   'tc'),  ##  0  - Transit centre
-                       NP(  1.306,   1e-7,     'p'),  ##  1  - Period
-                       UP(  1.500,   3.00,   'rho'),  ##  2  - Stellar density
-                       UP(  0.000,   0.99,     'b'),  ##  3  - Impact parameter
-                       UP( .15**2, .20**2,    'k2'),  ##  4  - planet-star area ratio
-                       UP(   1e-4,  10e-4,     'e'),  ##  5  - White noise std
-                       NP(    1.0,   0.01,     'c'),  ##  6  - Baseline constant
+        self.priors = [NP(  56895.443,   0.01,   'tc'),  ##  0  - Transit centre
+                       NP(  3.068,   1e-6,     'p'),  ##  1  - Period
+                       UP(  3.0,   5.0,   'rho'),  ##  2  - Stellar density
+                       UP(  0.0,   .99,     'b'),  ##  3  - Impact parameter
+                       UP( .16**2, 0.19**2,    'k2'),  ##  4  - planet-star area ratio
+                       UP(   1e-4,  20e-4,     'e'),  ##  5  - White noise std
+                       NP(    0.99,   0.01,     'c'),  ##  6  - Baseline constant
                        NP(    0.0,   0.01,     'x', lims=(-0.1,0.1)),  ##  7  - Residual extinction coefficient
                        UP(   -1.0,    1.0,     'u'),  ##  8  - limb darkening u
                        UP(   -1.0,    1.0,     'v')]  ##  9  - limb darkening v

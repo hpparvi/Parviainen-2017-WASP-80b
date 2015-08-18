@@ -15,7 +15,7 @@ from george.kernels import ExpKernel
 
 class LPFunction(object):
     def __init__(self, time, flux, airmass, gp_hyperparameters, nthreads=2):
-        self.tm = MA(interpolate=True, klims=(0.15,0.20), nthr=nthreads, nk=512) 
+        self.tm = MA(interpolate=True, klims=(0.16,0.19), nthr=nthreads, nk=512) 
         self.nthr = nthreads
 
         self.time     = array(time)
@@ -38,22 +38,22 @@ class LPFunction(object):
             gp.kernel = hp[2]**2*ExpKernel(1./hp[0])
             gp.compute(self.time, hp[1])
 
-        self.priors = [UP(  0.605,   0.615,   'tc'),  ##  0  - Transit centre
-                       NP(  1.306,   1e-7,     'p'),  ##  1  - Period
-                       UP(  1.000,   3.00,   'rho'),  ##  2  - Stellar density
-                       UP(  0.000,   0.99,     'b')]  ##  3  - Impact parameter
-        
+        self.priors = [NP(  56895.443,   0.1,   'tc'),  ##  0  - Transit centre
+                       NP(  3.068,   1e-6,     'p'),  ##  1  - Period
+                       UP(  3.0,   5.0,   'rho'),  ##  2  - Stellar density
+                       UP(  0.0,   .99,     'b')]  ##  3  - Impact parameter
+                       
         for ipb in range(self.npb):
             self.priors.extend([
-                       UP( .15**2, .20**2, 'k2_{:02d}'.format(ipb)),  ##  4 + 6*i  - planet-star area ratio
-                       NP(   5e-4,   1e-4,  'e_{:02d}'.format(ipb), lims=(0,1)),  ##  5 + 6*i  - White noise std
-                       NP(    1.0,   0.01,  'c_{:02d}'.format(ipb)),  ##  6 + 6*i  - Baseline constant
+                       UP( .16**2, 0.19**2, 'k2_{:02d}'.format(ipb)),  ##  4 + 6*i  - planet-star area ratio
+                       UP(   1e-4,  20e-4,   'e_{:02d}'.format(ipb)),  ##  5 + 6*i  - White noise std
+                       NP(    1.0,   0.01,   'c_{:02d}'.format(ipb)),  ##  6 + 6*i  - Baseline constant
                        NP(    0.0,   0.01,  'x_{:02d}'.format(ipb)),  ##  7 + 6*i  - Residual extinction coefficient
                        UP(   -1.0,    1.0,  'u_{:02d}'.format(ipb)),  ##  8 + 6*i  - limb darkening u
                        UP(   -1.0,    1.0,  'v_{:02d}'.format(ipb))]) ##  9 + 6*i  - limb darkening v
         self.ps = PriorSet(self.priors)
         
-        
+        self.wn_start = len(self.priors)#added for fit_color_gp
     def compute_baseline(self, pv):
         return pv[6::6]*np.exp(pv[7::6,]*self.airmass[:,newaxis])
     

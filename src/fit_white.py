@@ -104,11 +104,11 @@ if __name__ == '__main__':
 
     args = ap.parse_args()
 
-    mc_wn_file = join(dir_results,'TrES_3b_white_{:s}_wn_mc.npz'.format(args.flux_mode))
-    mc_gp_file = join(dir_results,'TrES_3b_white_{:s}_gp_mc.npz'.format(args.flux_mode))
+    mc_wn_file = join(dir_results,'WASP_80b_white_{:s}_wn_mc.npz'.format(args.flux_mode))
+    mc_gp_file = join(dir_results,'WASP_80b_white_{:s}_gp_mc.npz'.format(args.flux_mode))
 
-    de_file = join(dir_results,'TrES_3b_white_{:s}_de.npz'.format(args.flux_mode))
-    mc_file = join(dir_results,'TrES_3b_white_{:s}_{:s}_mc.npz').format(args.flux_mode,args.noise_model)
+    de_file = join(dir_results,'WASP_80b_white_{:s}_de.npz'.format(args.flux_mode))
+    mc_file = join(dir_results,'WASP_80b_white_{:s}_{:s}_mc.npz').format(args.flux_mode,args.noise_model)
 
     do_de = args.do_de or not exists(de_file)
     do_mc = args.do_mc or not exists(mc_file)
