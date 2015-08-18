@@ -4,7 +4,7 @@ p2
 ccopy_reg
 _reconstructor
 p3
-(ccore
+(csrc.core
 WavelengthSolution
 p4
 c__builtin__
