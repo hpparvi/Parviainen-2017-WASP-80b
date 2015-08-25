@@ -75,7 +75,26 @@ class WhiteFilter(object):
         
     def __call__(self, x):
         return np.sum([f(x) for f in self.filters], 0)
-    
+
+def H(T,g,mu=None):
+    """Atmospheric scale height [m]"""
+    mu = mu or 2.3*proton_mass
+    return T*k/(g*mu)
+
+## Stellar parameters
+## ------------------
+## From http://exoplanets.org/detail/WASP-80_b
+## 
+## Note: the stellar density estimate
+MSTAR = 0.580*msun # [m]
+RSTAR = 0.571*rsun # [m]
+TSTAR = 4150       # [K]
+TEQ   = 825       # [K]   from http://arxiv.org/pdf/1312.4982.pdf
+LOGGS = 4.60      
+LOGGP = 3.181 
+
+
+
 ## Matplotlib configuration
 AAOCW, AAPGW = 3.4645669, 7.0866142
 rc('figure', figsize=(13,5))

@@ -18,8 +18,18 @@ class LPFunctionRN(LPFunction):
     def __init__(self, time, flux, airmass, nthreads=2):
         super(LPFunctionRN, self).__init__(time, flux, airmass, nthreads)
         self.gp = GP(ExpKernel(1))
-        self.priors.append(UP(1e-5,1e-3, 'gp_std'))
+        
+        self.priors.append(UP(1e-5,1e-2, 'gp_std')) # originally 1e^-3
         self.priors.append(UP(  -5,   6, 'gp_log_inv_length'))
+        
+        
+        #self.priors.append(UP(-1e-3,4e-2, 'gp_std')) # originally 1e^-3
+        #self.priors.append(UP(  -5,   6, 'gp_log_inv_length'))
+        
+        #number 2
+        #self.priors.append(UP(1e-5,5e-3, 'gp_std')) # originally 1e^-3
+        #self.priors.append(UP(  -5,   6, 'gp_log_inv_length'))
+        
         self.ps = PriorSet(self.priors)
         
     def log_posterior(self,pv):
