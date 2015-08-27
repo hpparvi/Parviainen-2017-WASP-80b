@@ -36,7 +36,7 @@ class LPFunction(object):
         for ipb in range(self.npb):
             self.priors.extend([
                        UP( .16**2, 0.19**2, 'k2_{:02d}'.format(ipb)),  ##  4 + 6*i  - planet-star area ratio
-                       UP(   1e-4,  40e-4,   'e_{:02d}'.format(ipb)),  ##  5 + 6*i  - White noise std
+                       UP(   1e-4,  50e-4,   'e_{:02d}'.format(ipb)),  ##  5 + 6*i  - White noise std
                        NP(    1.0,   0.01,   'c_{:02d}'.format(ipb)),  ##  6 + 6*i  - Baseline constant
                        NP(    0.0,   0.01,  'x_{:02d}'.format(ipb)),  ##  7 + 6*i  - Residual extinction coefficient
                        UP(   -1.0,    1.0,  'u_{:02d}'.format(ipb)),  ##  8 + 6*i  - limb darkening u

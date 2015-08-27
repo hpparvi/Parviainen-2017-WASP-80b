@@ -12,23 +12,16 @@ from lpf_ww import LPFunction
 from core import *
 
 from george import GP
-from george.kernels import ExpSquaredKernel, ExpKernel
+from george.kernels import Matern32Kernel, ExpSquaredKernel, ExpKernel
 
 class LPFunctionRN(LPFunction):
     def __init__(self, time, flux, airmass, nthreads=2):
         super(LPFunctionRN, self).__init__(time, flux, airmass, nthreads)
         self.gp = GP(ExpKernel(1))
-        
-        self.priors.append(UP(1e-5,1e-2, 'gp_std')) # originally 1e^-3
+        #self.gp = GP(Matern32Kernel(1)) #Matern32Kernel
+        self.priors.append(UP(1e-5,1e-3, 'gp_std')) # originally 1e^-3
         self.priors.append(UP(  -5,   6, 'gp_log_inv_length'))
         
-        
-        #self.priors.append(UP(-1e-3,4e-2, 'gp_std')) # originally 1e^-3
-        #self.priors.append(UP(  -5,   6, 'gp_log_inv_length'))
-        
-        #number 2
-        #self.priors.append(UP(1e-5,5e-3, 'gp_std')) # originally 1e^-3
-        #self.priors.append(UP(  -5,   6, 'gp_log_inv_length'))
         
         self.ps = PriorSet(self.priors)
         
@@ -36,7 +29,7 @@ class LPFunctionRN(LPFunction):
         if np.any(pv < self.ps.pmins) or np.any(pv>self.ps.pmaxs): 
             return -1e18
 
-        self.gp.kernel = pv[10]**2*ExpKernel(1./10**pv[11])
+        #self.gp.kernel = pv[10]**2*Matern32Kernel(1./10**pv[11]) #Matern32Kernel
         self.gp.compute(self.time, pv[5])
 
         lnlike_ld = self.lds.lnlike_qd(pv[8:10])

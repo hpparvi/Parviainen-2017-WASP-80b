@@ -42,7 +42,7 @@ class LPFunction(object):
             
         self.wn_start = len(self.priors)
         for ipb in range(self.npb-1):
-            self.priors.append(UP(1e-4,  30e-4,  'e_{:02d}'.format(ipb))) ## wn_start + i - White noise std
+            self.priors.append(UP(1e-4,  50e-4,  'e_{:02d}'.format(ipb))) ## wn_start + i - White noise std
             
         self.cr_start = len(self.priors)
         for ipb in range(self.npb-1):
