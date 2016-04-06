@@ -1,1 +1,1 @@
-# Parviainen-WASP-80b-Osiris
+# WASP-80b ground-based transmission spectroscopy

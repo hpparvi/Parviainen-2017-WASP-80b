@@ -13,7 +13,8 @@ from exotk.utils.misc import fold
 result_file = 'results/external.h5'
 
 class Sampler(object):
-    def __init__(self, run_name, lpf, npop, niter_de, niter_mc):
+    def __init__(self, result_file, run_name, lpf, npop, niter_de, niter_mc):
+        self.result_file = result_file
         self.run_name = run_name
         self.lpf = lpf
         self.niter_de = niter_de
@@ -86,7 +87,7 @@ class Sampler(object):
 
         nfig = (4,3) if self.lpf.nlc < 28 else (7,4)
 
-        fig,axs = pl.subplots(nfig, figsize=(14,14), sharey=True, sharex=True)
+        fig,axs = pl.subplots(*nfig, figsize=(14,14), sharey=True, sharex=True)
         for iax,ilc in enumerate(self.lpf.lcorder):
             a = axs.flat[iax]
             if show_systematics:

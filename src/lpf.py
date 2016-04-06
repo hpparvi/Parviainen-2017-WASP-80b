@@ -19,6 +19,8 @@ TZERO = 2456000
 TC = 125.417523 # Zero epoch
 P  =   3.067861 # Orbital period
 
+c_passbands = 'w g r i z J H K'.split() + ['nb%02i'%i for i in range(21)]
+
 def map_ldc(q1,q2):
     a,b = sqrt(q1), 2.*q2
     return a*b, a*(1.-b)
@@ -27,13 +29,13 @@ def map_uv_to_qq(u,v):
     return (u+v)**2, u/(2*(u+v))
 
 class LogPosteriorFunction(object):
-    def __init__(self, passbands, constant_k=True, noise='white', use_ldtk=False):
-        self.passbands = passbands
-        self.unique_pbs = unique(self.passbands)
-        self.gpbids = [self.unique_pbs.searchsorted(pb) for pb in self.passbands]
+    def __init__(self, passbands, constant_k=True, noise='white', use_ldtk=False, **kwargs):
+        self.passbands  = pd.Categorical(passbands, categories=c_passbands, ordered=True)
+        self.lcorder    = self.passbands.argsort()
+        self.unique_pbs = self.passbands.order().unique()
+        self.passbands  = pd.Categorical(self.passbands, categories=self.unique_pbs.__array__(), ordered=True)
+        self.gpbids = self.passbands.labels.copy()
         self.lpbids = copy(self.gpbids)
-        self.cpassbands = pd.Series(pd.Categorical(self.passbands, categories='g r i z J H K'.split()))
-        self.lcorder = self.cpassbands.sort(inplace=False).index.values
 
         self.use_ldtk = use_ldtk
         self.constant_k = constant_k
@@ -43,6 +45,8 @@ class LogPosteriorFunction(object):
         self.npb = npb = len(self.unique_pbs)
         self._wrk_ld   = zeros([self.nlc,2])
         
+        ldf_path= kwargs.get('ldf_path', 'data/external_lcs.h5')
+
         ## Basic parameters
         ## ----------------
         self.priors = [NP(    TC,   5e-3,   'tc'), ##  0  - Transit centre
@@ -54,18 +58,18 @@ class LogPosteriorFunction(object):
         ## ----------
         self._sk2 = len(self.priors)
         if constant_k:
-            self.priors.append( UP(0.16**2, 0.18**2, 'k2')) ##  4  - planet-star area ratio
+            self.priors.append( UP(0.160**2, 0.185**2, 'k2_w')) ##  4  - planet-star area ratio
         else:
-            self.priors.extend([UP(0.16**2, 0.18**2, 'k2_%i'%ipb) 
-                                for ipb in range(self.npb)]) ##  4  - planet-star area ratio
+            self.priors.extend([UP(0.160**2, 0.185**2, 'k2_%s'%pb) 
+                                for pb in self.unique_pbs]) ##  4  - planet-star area ratio
             
         ## Limb darkening
         ## --------------
         self._sq1 = len(self.priors)
         self._sq2 = self._sq1+1
-        for ipb in range(self.npb):
-            self.priors.extend([UP(0, 1, 'q1_%i'%ipb),      ##  sq1 + 2*ipb -- limb darkening q1
-                                UP(0, 1, 'q2_%i'%ipb)])     ##  sq2 + 2*ipb -- limb darkening q2
+        for pb in self.unique_pbs:
+            self.priors.extend([UP(0, 1, 'q1_%s'%pb),      ##  sq1 + 2*ipb -- limb darkening q1
+                                UP(0, 1, 'q2_%s'%pb)])     ##  sq2 + 2*ipb -- limb darkening q2
             
         ## Baseline constant
         ## -----------------
@@ -87,7 +91,7 @@ class LogPosteriorFunction(object):
         ## Limb darkening with LDTk
         ## ------------------------
         if use_ldtk:
-            dff = pd.read_hdf('data/external_lcs.h5', 'transmission')
+            dff = pd.read_hdf(ldf_path, 'transmission')
             self.filters = []
             for pb in self.unique_pbs:
                 self.filters.append(TabulatedFilter(pb, dff.index.values, tm=dff[pb].values))
@@ -142,6 +146,7 @@ class LogPosteriorFunction(object):
             uv = zeros([self.npb,2])
             q1 = pv[self._sq1:self._sq1+2*self.npb:2]
             q2 = pv[self._sq2:self._sq2+2*self.npb:2]
+
             a,b = sqrt(q1), 2*q2
             uv[:,0] = a*b
             uv[:,1] = a*(1.-b)
@@ -160,19 +165,15 @@ class LogPosteriorFunction(object):
 
         
 class LPF(LogPosteriorFunction):
-    def __init__(self, times, fluxes, passbands, constant_k=True, noise='white', use_ldtk=False, nthreads=4):
+    def __init__(self, times, fluxes, passbands, constant_k=True, noise='white', use_ldtk=False, nthreads=4, **kwargs):
         """Log-posterior function for a single dataset.
         """
-        super(LPF, self).__init__(passbands, constant_k, noise, use_ldtk)
+        super(LPF, self).__init__(passbands, constant_k, noise, use_ldtk, **kwargs)
         self.tm = MA(interpolate=False, nthr=nthreads) 
         self.nt = nthreads
         self.times  = times
         self.fluxes = fluxes
         self._wrk_k = zeros(self.nlc)
-        self.fmasks = [isfinite(f) for f in fluxes]
-
-        self.mtimes  = [t[m] for t,m in zip(self.times, self.fmasks)]
-        self.mfluxes = [f[m] for f,m in zip(self.fluxes, self.fmasks)]
 
         ## Noise model setup
         ## -----------------
@@ -183,6 +184,14 @@ class LPF(LogPosteriorFunction):
             self.lnlikelihood = self.lnlikelihood_rn
         else:
             raise NotImplementedError('Bad noise model')
+
+
+    def apply_masks(self, masks):
+        self.masks   = masks
+        self.mtimes  = [t[~m] for t,m in zip(self.times,  masks)]
+        self.times   = [t[m]  for t,m in zip(self.times,  masks)]
+        self.mfluxes = [f[~m] for f,m in zip(self.fluxes, masks)]
+        self.fluxes  = [f[m]  for f,m in zip(self.fluxes, masks)]
 
 
     def compute_baseline(self, pv):
@@ -199,7 +208,7 @@ class LPF(LogPosteriorFunction):
         self._wrk_ld[:,1] = a*(1.-b)
 
         flux_m = []
-        for time,k,ldc in zip(self.mtimes,self._wrk_k,self._wrk_ld): 
+        for time,k,ldc in zip(self.times,self._wrk_k,self._wrk_ld): 
             z = of.z_circular(time, pv[0], pv[1], _a, _i, self.nt) 
             flux_m.append(self.tm(z, k, ldc))
         return flux_m
@@ -211,7 +220,7 @@ class LPF(LogPosteriorFunction):
         
     def lnlikelihood_wn(self, pv):
         fluxes_m = self.compute_lc_model(pv)
-        return sum([ll_normal_es(fo, fm, wn) for fo,fm,wn in zip(self.mfluxes, fluxes_m, pv[self.iwn])]) 
+        return sum([ll_normal_es(fo, fm, wn) for fo,fm,wn in zip(self.fluxes, fluxes_m, pv[self.iwn])]) 
 
 
         
@@ -225,7 +234,11 @@ class CLPF(LogPosteriorFunction):
         sbl = self._sbl
         swn = self._swn if self.noise == 'white' else None
         for lpf in self.lpfs:
-            lpf.gpbids = [self.unique_pbs.searchsorted(pb) for pb in lpf.passbands]
+            lpf.gpbids = pd.Categorical(lpf.passbands, categories=self.passbands.categories, ordered=True).labels
+            lpf._sq1 = self._sq1
+            lpf._sq2 = self._sq2
+            lpf._sbl = self._sbl
+            lpf._swn = self._swn
             lpf.set_pv_indices(sbl,swn)
             sbl += lpf.nlc
             if self.noise == 'white':
@@ -240,17 +253,17 @@ class CLPF(LogPosteriorFunction):
 
     @property
     def times(self):
-        return np.sum([lpf.times for lpf in self.lpfs])
+        return np.concatenate([lpf.times for lpf in self.lpfs])
 
     @property
     def fluxes(self):
-        return np.sum([lpf.fluxes for lpf in self.lpfs])
+        return np.concatenate([lpf.fluxes for lpf in self.lpfs])
 
     def compute_baseline(self, pv):
-        return np.sum([lpf.compute_baseline(pv) for lpf in self.lpfs])
+        return np.concatenate([lpf.compute_baseline(pv) for lpf in self.lpfs])
 
     def compute_transit(self, pv):
-        return np.sum([lpf.compute_transit(pv) for lpf in self.lpfs])
+        return np.concatenate([lpf.compute_transit(pv) for lpf in self.lpfs])
 
     def compute_lc_model(self, pv):
-        return np.sum([lpf.compute_lc_model(pv) for lpf in self.lpfs])
+        return np.concatenate([lpf.compute_lc_model(pv) for lpf in self.lpfs])

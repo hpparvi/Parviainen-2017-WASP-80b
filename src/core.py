@@ -18,7 +18,7 @@ from matplotlib import rc
 
 from numpy import pi, array, exp, abs, sum, zeros_like, arange, concatenate, argsort, s_
 from scipy.constants import k, G, proton_mass
-from scipy.optimize import fmin_powell
+from scipy.optimize import fmin_powell, fmin
 
 from exotk.constants import rjup, mjup, rsun, msun
 from pyfc import psf_g1d
@@ -95,17 +95,20 @@ class CalibrationSpectrum(object):
       
     
     def chi_sqr(self, pv):
-        t = (pv[0] + array([-5,5])).astype(np.int)
+        if not(5 < pv[0] < self.spectrum.size - 6):
+            return np.inf
+        t = np.floor((pv[0] + array([-5,5]))).astype(np.int)
         sl = s_[t[0]:t[1]]
         model = psf_g1d(pv[0]-sl.start, pv[1], fwhm=pv[2], npx=10)
         return ((self.spectrum[sl]-model)**2).sum()
 
-
+            
     def fit(self, offset=0, minargs={}, disp_min=False):
         self.initial_guess[1::2] += offset
         pvs = [fmin_powell(self.chi_sqr, self.initial_guess[[1+2*i,2+2*i,0]], disp=disp_min) for i in range(self.nlines)]
+        #pvs = [fmin(self.chi_sqr, self.initial_guess[[1+2*i,2+2*i,0]], disp=disp_min) for i in range(self.nlines)]
         pva = array(pvs)
-        self._fit_result = concatenate([[pva[:,-1].mean()],pva[:,:2].ravel()])
+        self._fit_result = concatenate([[np.median(pva[:,-1])],pva[:,:2].ravel()])
         self.solution.fit(self.fitted_centers, self.lines) 
 
             
@@ -124,7 +127,7 @@ class WLFitter(object):
         self.wl_to_pixel = self.solution.wl_to_pixel
     
     def fit(self, offset=0):
-        [s.fit(offset=offset) for s in self.spectra]
+        [s.fit(offset=offset, disp_min=False) for s in self.spectra]
         lines_fit = self.fitted_centers
         lines_ref = self.lines
         sids = argsort(lines_ref)
@@ -224,8 +227,12 @@ wlc_na = array([589.4])
 
 ## Narrow-band filters
 ##
-pb_centers    = 540. + np.arange(16)*25
-pb_filters_nb = [GeneralGaussian('', c, 12, 20) for c in pb_centers]
-pb_filter_bb  = WhiteFilter('white', pb_filters_nb)
+pb_filters_nb = [GeneralGaussian('nb{:02d}'.format(i), 530+20*i, 10, 15) for i in range(21)]
+pb_filters_k  = [GeneralGaussian('K{:02d}'.format(i),  768.2+6*(i-3), 3, 15) for i in range(7)]
+pb_filters_na = [GeneralGaussian('Na{:02d}'.format(i), 589.4+6*(i-3), 3, 15) for i in range(7)]
+
+#pb_centers    = 540. + np.arange(16)*25
+#pb_filters_nb = [GeneralGaussian('', c, 12, 20) for c in pb_centers]
+#pb_filter_bb  = WhiteFilter('white', pb_filters_nb)
 
 
