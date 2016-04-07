@@ -1,0 +1,47 @@
+#!/usr/bin/env python
+from numpy import array, ones_like, concatenate, s_
+from numpy.random import normal
+from argparse import ArgumentParser
+
+from core import *
+from sampler import Sampler
+from lpf_narrowband_dw import LPFC
+
+if __name__ == '__main__':
+    ap = ArgumentParser()
+    ap.add_argument('--de-n-iterations', type=int, default=1000)
+    ap.add_argument('--mc-n-runs',       type=int, default=3)
+    ap.add_argument('--mc-n-iterations', type=int, default=2000)
+    ap.add_argument('--mc-thin'  ,       type=int, default=50)
+    ap.add_argument('--n-walkers',       type=int, default=500)
+    ap.add_argument('--n-threads',       type=int, default=4)
+    ap.add_argument('--do-de', action='store_true', default=False)
+    ap.add_argument('--do-mc', action='store_true', default=False)
+    ap.add_argument('--dont-continue-mc', dest='continue_mc', action='store_false', default=True)
+    ap.add_argument('--gp-hp-file', default='')
+    ap.add_argument('--lc-name', default='nomask')
+    ap.add_argument('--run-name', default='nomask')
+    args = ap.parse_args()
+
+    lpf = LPFC(noise='white', constant_k=False, use_ldtk=False)
+    sampler = Sampler(RFILE_GTC, 'nb/vkwn_dw', lpf, args.n_walkers, notebook=False)
+
+    try:
+        pd.read_hdf(sampler.result_file, sampler.de_path)
+    except (KeyError,IOError):
+        do_de = True
+        sampler.info('Couldnt find DE results, forcing a DE run')
+
+    if args.do_de:
+        sampler.optimise(args.de_n_iterations)
+
+    if args.do_mc:
+        if args.continue_mc:
+            ch = pd.read_hdf(sampler.result_file, sampler.mc_path).values
+            ch = ch.reshape([args.n_walkers, -1, sampler.lpf.ps.ndim])
+            p0 = ch[:,-1,:]
+        else:
+            p0 = None
+            
+        sampler.sample(args.mc_n_iterations, args.mc_thin, population=p0)
+ 
