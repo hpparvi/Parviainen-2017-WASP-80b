@@ -1,16 +1,5 @@
-from __future__ import division
-from george import GP, HODLRSolver
-from george.kernels import ExpKernel, ExpSquaredKernel
-from src.lpf import *
-import matplotlib.pyplot as pl
-from scipy.optimize import fmin
-
-from IPython.display import clear_output, HTML, display
-from pyde.de import DiffEvol
-from emcee import EnsembleSampler
-from exotk.utils.misc import fold
-
-result_file = 'results/external.h5'
+from core import *
+from lpf import *
 
 class Sampler(object):
     def __init__(self, result_file, run_name, lpf, npop, niter_de, niter_mc):
@@ -34,7 +23,7 @@ class Sampler(object):
             pass
         finally:
             dfde = pd.DataFrame(self.de.population, columns=self.lpf.ps.names)
-            dfde.to_hdf(result_file,'{:s}/de'.format(self.run_name))
+            dfde.to_hdf(self.result_file,'{:s}/de'.format(self.run_name))
 
 
     def sample(self, niter=None):
@@ -43,8 +32,8 @@ class Sampler(object):
             fc = self.sampler.chain[:,min(2000,self.sampler.iterations//2):self.sampler.iterations:100,:].reshape([-1,self.lpf.ndim])
             dfmc = pd.DataFrame(self.sampler.chain[:,self.sampler.iterations-1,:], columns=self.lpf.ps.names)
             dffc = pd.DataFrame(fc, columns=self.lpf.ps.names)
-            dfmc.to_hdf(result_file,'{:s}/mc'.format(self.run_name))
-            dffc.to_hdf(result_file,'{:s}/fc'.format(self.run_name))
+            dfmc.to_hdf(self.result_file,'{:s}/mc'.format(self.run_name))
+            dffc.to_hdf(self.result_file,'{:s}/fc'.format(self.run_name))
 
         if self.sampler.chain.shape[1] == 0:
             pv0 = self.de.population.copy()
@@ -65,7 +54,7 @@ class Sampler(object):
 
 
     def plot(self, show_systematics=False):
-        fc = pd.read_hdf(result_file, '{:s}/fc'.format(self.run_name))
+        fc = pd.read_hdf(self.result_file, '{:s}/fc'.format(self.run_name))
         mp = np.median(fc, 0)
         phases = [fold(t, P, TC, 0.5) - 0.5 for t in self.lpf.times]
 
@@ -122,7 +111,7 @@ class LPFExt(LPF):
                                     noise=noise, use_ldtk=use_ldtk)
         
     def setup_gp(self):
-        self.hps = pd.read_hdf(result_file, 'gphp/{:s}'.format(self.dataset))
+        self.hps = pd.read_hdf(self.result_file, 'gphp/{:s}'.format(self.dataset))
         self.gps = [GPTime(t,f) for t,f in zip(self.times, self.fluxes)]
         [gp.compute(pv) for gp,pv in zip(self.gps, self.hps.values[:,:-1])]
         
@@ -154,7 +143,7 @@ class LPFFukui2014(LPFExt):
 
 
     def setup_gp(self):
-        self.hps = pd.read_hdf(result_file, 'gphp/fukui2014')
+        self.hps = pd.read_hdf(self.result_file, 'gphp/fukui2014')
         self.gps = [GPF14(i,f) for i,f in zip(self.gp_inputs, self.fluxes)]
         [gp.compute(pv) for gp,pv in zip(self.gps, self.hps.values[:,:-1])]
 
@@ -197,7 +186,7 @@ class GPTime(object):
         self.names = 'log10_amplitude inverse_time_scale log10_white_noise'.split()
 
         self.priors = [UP(-3.5,  -2, 'log_ta'), ##  0  - log10 time amplitude
-                       UP( 5e2, 5e5,    'its'), ##  1  - inverse time scale
+                       UP( 5e-2, 5e5,    'its'), ##  1  - inverse time scale
                        UP(-4.0,  -2, 'log_wn')] ##  2  - log10 white noise
         self.ps = PriorSet(self.priors)
 

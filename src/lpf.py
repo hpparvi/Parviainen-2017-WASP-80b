@@ -1,27 +1,17 @@
 from __future__ import division
 import math as mt
-import numpy as np
-import pandas as pd
-
-from os.path import join
 from numpy import zeros, unique, sqrt, isfinite, concatenate, inf, s_
-from copy import  copy, deepcopy
+from copy import  copy
 
-from ldtk import LDPSetCreator, BoxcarFilter, TabulatedFilter
 from pytransit import MandelAgol as MA
 from pytransit.orbits_f import orbits as of
 from exotk.priors import PriorSet, UP, NP, JP
 from exotk.utils.orbits import as_from_rhop
 from exotk.utils.likelihood import ll_normal_es
 
-TZERO = 2456000
+from core import *
 
-TC = 125.417523 # Zero epoch
-P  =   3.067861 # Orbital period
-
-c_passbands = 'w g r i z J H K'.split() + ['nb%02i'%i for i in range(21)]
-
-def map_ldc(q1,q2):
+def map_qq_to_uv(q1,q2):
     a,b = sqrt(q1), 2.*q2
     return a*b, a*(1.-b)
 

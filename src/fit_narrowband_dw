@@ -5,43 +5,71 @@ from argparse import ArgumentParser
 
 from core import *
 from sampler import Sampler
-from lpf_narrowband_dw import LPFC
+from lpf_narrowband_dw import LPFC as LPFWN
+from lpf_narrowband_gp import LPFC as LPFRN
 
 if __name__ == '__main__':
     ap = ArgumentParser()
-    ap.add_argument('--de-n-iterations', type=int, default=1000)
-    ap.add_argument('--mc-n-runs',       type=int, default=3)
-    ap.add_argument('--mc-n-iterations', type=int, default=2000)
-    ap.add_argument('--mc-thin'  ,       type=int, default=50)
-    ap.add_argument('--n-walkers',       type=int, default=500)
-    ap.add_argument('--n-threads',       type=int, default=4)
     ap.add_argument('--do-de', action='store_true', default=False)
     ap.add_argument('--do-mc', action='store_true', default=False)
+    ap.add_argument('--de-n-iterations', type=int, default=1000)
+    ap.add_argument('--mc-n-runs',       type=int, default=1)
+    ap.add_argument('--mc-n-iterations', type=int, default=2000)
+    ap.add_argument('--mc-thin'  ,       type=int, default=50)
+    ap.add_argument('--n-walkers',       type=int, default=600)
+    ap.add_argument('--n-threads',       type=int, default=4)
+    ap.add_argument('--dont-continue-de', dest='continue_de', action='store_false', default=True)
     ap.add_argument('--dont-continue-mc', dest='continue_mc', action='store_false', default=True)
+    ap.add_argument('--reset-chain', action='store_true', default=True)
     ap.add_argument('--gp-hp-file', default='')
     ap.add_argument('--lc-name', default='nomask')
-    ap.add_argument('--run-name', default='nomask')
+    ap.add_argument('--run-name', default='vk')
+    ap.add_argument('--use-ldtk', action='store_true', default=False)
+    ap.add_argument('--noise', choices=['white','red'], default='white')
     args = ap.parse_args()
 
-    lpf = LPFC(noise='white', constant_k=False, use_ldtk=False)
-    sampler = Sampler(RFILE_GTC, 'nb/vkwn_dw', lpf, args.n_walkers, notebook=False)
+    fname = join(DRESULT, 'gtc_nb_{:s}{:s}.h5'.format('wn' if args.noise == 'white' else 'rn',
+                                                      '_ldtk' if args.use_ldtk else ''))
+    rname = args.run_name
 
+    if args.noise == 'white':
+        lpf = LPFWN(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
+    else:
+        lpf = LPFRN(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
+        
+    sampler = Sampler(fname, rname, lpf, args.n_walkers, mc_thin=args.mc_thin,
+                      mc_nruns=args.mc_n_runs, notebook=False)
+
+    sampler.info('Saving results to %s', relpath(fname))
+    sampler.info('Run name %s', rname)
+    sampler.info('Population size %i', args.n_walkers)
+    
+    ## Differential evolution
+    ## ----------------------
     try:
         pd.read_hdf(sampler.result_file, sampler.de_path)
+        de_exists = True
     except (KeyError,IOError):
-        do_de = True
         sampler.info('Couldnt find DE results, forcing a DE run')
-
-    if args.do_de:
+        de_exists = False
+        
+    if args.do_de or not de_exists:
         sampler.optimise(args.de_n_iterations)
 
+    ## MCMC sampling
+    ## -------------
+    try:
+        pd.read_hdf(sampler.result_file, sampler.mc_path)
+        mc_exists = True
+    except (KeyError,IOError):
+        mc_exists = False
+         
     if args.do_mc:
-        if args.continue_mc:
-            ch = pd.read_hdf(sampler.result_file, sampler.mc_path).values
-            ch = ch.reshape([args.n_walkers, -1, sampler.lpf.ps.ndim])
-            p0 = ch[:,-1,:]
+        sampler.info('Running MC with %i runs and %i iterations', args.mc_n_runs, args.mc_n_iterations)
+        if args.continue_mc and mc_exists:
+            p0 = pd.read_hdf(sampler.result_file, sampler.mc_path).values
         else:
             p0 = None
             
-        sampler.sample(args.mc_n_iterations, args.mc_thin, population=p0)
+        sampler.sample(args.mc_n_iterations, population=p0)
  
