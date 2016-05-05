@@ -1,31 +1,38 @@
 from __future__ import division
+import warnings
+import os
+import sys
+import math as m
+import logging
 
 import pyfits as pf
 import pandas as pd
 import numpy as  np
+import seaborn as sb
+import matplotlib.pyplot as pl
 
 from glob import glob
 from os.path import join, exists, basename, abspath, relpath
 from numpy.polynomial.chebyshev import Chebyshev
 
-import os
-import sys
-import math as m
-import seaborn as sb
-import pyfits as pf
-import matplotlib.pyplot as pl
-import logging
-
 from matplotlib.dates import datestr2num
 from matplotlib import rc
 from IPython.display import clear_output, HTML, display
+
+from astropy.time import Time
+from scipy.signal import medfilt as mf
+from scipy.ndimage import median_filter as MF
+from scipy.ndimage import gaussian_filter1d as gf
+from scipy.ndimage import binary_erosion
 
 from numpy import pi, array, exp, abs, sum, zeros_like, arange, concatenate, argsort, s_
 from scipy.constants import k, G, proton_mass
 from scipy.optimize import fmin_powell, fmin
 
+N = lambda a: a/np.median(a)
+
 try:
-    from pyfc import psf_g1d
+    from pyfc import psf_g1d, logl_g1d
 except ImportError:
     print "Couldn't import PyFC"
     
@@ -173,7 +180,7 @@ class WhiteFilter(object):
 
 ## Narrow-band filters
 ## -------------------
-pb_filters_nb = [GeneralGaussian('nb{:02d}'.format(i), 530+20*i, 10, 15) for i in range(21)]
+pb_filters_nb = [GeneralGaussian('nb{:02d}'.format(i), 530+20*i, 10, 15) for i in range(19)]
 pb_filters_k  = [GeneralGaussian('K{:02d}'.format(i),  768.2+6*(i-3), 3, 15) for i in range(7)]
 pb_filters_na = [GeneralGaussian('Na{:02d}'.format(i), 589.4+6*(i-3), 3, 15) for i in range(7)]
 
@@ -278,7 +285,7 @@ class WavelengthSolution(object):
         self.fitted_lines = fitted_lines
         self.reference_lines = reference_lines
         self._cp2w = Chebyshev.fit(self.fitted_lines, self.reference_lines, 5, domain=[0,2051])
-        self._cw2p = Chebyshev.fit(self.reference_lines, self.fitted_lines, 5, domain=[400,1000])
+        self._cw2p = Chebyshev.fit(self.reference_lines, self.fitted_lines, 5, domain=[500,950])
         
     def pixel_to_wl(self, pixels):
         return self._cp2w(pixels)
