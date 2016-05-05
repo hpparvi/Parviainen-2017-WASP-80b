@@ -20,7 +20,7 @@ class Sampler(object):
         self.fc_path = '{:s}/fc'.format(run_name)
         self.mc_path = '{:s}/mc'.format(run_name)
         self.lpf = lpf
-        self.de = DiffEvol(lpf.lnposterior, lpf.ps.bounds, npop, maximize=True, F=0.25, C=0.1)
+        self.de = DiffEvol(lpf.lnposterior, lpf.ps.bounds, npop, maximize=True, F=0.25, C=0.10)
         self.sampler = EnsembleSampler(npop, lpf.ps.ndim, lpf.lnposterior)
         self.de_iupdate = kwargs.get('de_iupdate',  10)
         self.de_isave   = kwargs.get('de_isave',   100)
@@ -31,7 +31,7 @@ class Sampler(object):
                 
         if not notebook:
             self.logger  = logging.getLogger()
-            logfile = open('{:s}_{:s}.log'.format(basename(result_file)[:-3], run_name.replace('/','_')), mode='w')
+            logfile = open('{:s}_{:s}.log'.format(basename(result_file), run_name.replace('/','_')), mode='w')
             fh = logging.StreamHandler(logfile)
             fh.setLevel(logging.DEBUG)
             self.logger.addHandler(fh)
@@ -44,14 +44,16 @@ class Sampler(object):
         else:
             self.disp = self.info
 
+        self.info('Initialised sampler with')
+        self.info('  DE update interval %i', self.de_iupdate)
+        self.info('  DE save interval %i', self.de_isave)
+        self.info('  MCMC update interval %i', self.mc_iupdate)
+        self.info('  MCMC save interval %i', self.mc_isave)
+
         
-    def optimise(self, niter, cont=True):
-        if cont:
-            try:
-                pv0 = pd.read_hdf(self.result_file, self.de_path).values
-                self.info('Continuing from a previous DE result') 
-            except (KeyError,IOError):
-                self.info('Starting DE from scratch') 
+    def optimise(self, niter, population=None, cont=True):
+        if population is not None:
+            self.de._population[:] = population
         
         try:
             for i,r in enumerate(self.de(niter)):
@@ -102,17 +104,11 @@ class Sampler(object):
             
     def save_de(self):
         self.info('Saving the DE population')
-        df = pd.DataFrame(self.de.population, columns=self.lpf.ps.names)
-        df.to_hdf(self.result_file, self.de_path)        
-
+        np.savez(self.result_file+'_de.npz', population=self.de.population, columns=self.lpf.ps.names)
+    
         
     def save_mc(self):
         self.info('Saving the MCMC chains with %i iterations', self.sampler.iterations)
-        mc = self.sampler.chain[:,self.sampler.iterations//self.mc_thin-2,:]
-        fc = self.sampler.chain[:,:self.sampler.iterations//self.mc_thin,:].reshape([-1,self.lpf.ps.ndim])
-        dfmc = pd.DataFrame(mc, columns=self.lpf.ps.names)
-        dffc = pd.DataFrame(fc, columns=self.lpf.ps.names)
-        dfmc.to_hdf(self.result_file, self.mc_path)
-        dffc.to_hdf(self.result_file, self.fc_path)
-                    
-
+        ns = self.sampler.iterations // self.mc_thin
+        np.savez(self.result_file+'_mc.npz', chains=self.sampler.chain[:,:ns,:], columns=self.lpf.ps.names)
+    

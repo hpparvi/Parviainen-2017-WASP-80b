@@ -8,13 +8,8 @@ from scipy.stats import scoreatpercentile as sap
 from core import *
 from extcore import *
 
-class GPT(GPTime):
-    @property
-    def kernel(self):
-        return 1e-6*ExpSquaredKernel(1)
-
 class LPFC(LPF):
-    def __init__(self, use_ldtk=False, n_threads=4):
+    def __init__(self, use_ldtk=False, n_threads=4, test=False):
         self.df1 = df1 = pd.merge(pd.read_hdf('../data/aux.h5','night1'),
                                   pd.read_hdf('../results/gtc_light_curves.h5','night1'),
                                   left_index=True, right_index=True)
@@ -67,6 +62,7 @@ class LPFC(LPF):
         super(LPFC,self).__init__(times, fluxes, 2*pbs,
                                   use_ldtk=False, constant_k=False, noise='white',
                                   ldf_path='../data/external_lcs.h5', nthreads=n_threads)
+        self.use_ldtk = use_ldtk
 
         self.fluxes_o = copy(self.fluxes)
         self.fluxes_m = npb*[mean(self.fluxes[:npb], 0)] + npb*[mean(self.fluxes[npb:], 0)] 
@@ -118,7 +114,6 @@ class LPFC(LPF):
         ## Update the priors using the external data modelling
         ## ---------------------------------------------------
         fc = pd.read_hdf(RFILE_EXT, 'vkrn_ldtk/fc')
-
         self.priors[0] = NP(fc.tc.mean(),   10*fc.tc.std(),  'tc',  limsigma=5)
         self.priors[1] = NP(fc.p.mean(),    10*fc.p.std(),    'p',  limsigma=5)
         self.priors[2] = NP(fc.rho.mean(),  fc.rho.std(),   'rho',  limsigma=5)
@@ -127,15 +122,25 @@ class LPFC(LPF):
         self.ps = PriorSet(self.priors)
         self.setup_gp()
 
+        self.prior_kw = NP(0.1707, 3.2e-4, 'kw', lims=(0.16,0.18))
+        
         ## Limb darkening with LDTk
         ## ------------------------
         if use_ldtk:
             self.filters = pb_filters_nb
             self.sc = LDPSetCreator([4150,100], [4.6,0.2], [-0.14,0.16], self.filters)
             self.lp = self.sc.create_profiles(2000)
-            self.lp.set_uncertainty_multiplier(2)
-        
-        
+            #self.lp.set_uncertainty_multiplier(2)
+            
+        if test:
+            self.test_pv = pvt = np.load('test_pv.npz')['pv']
+            pvt[self.ik2] = 0.17**2
+            pvt[array(self.ik2)[[ 2, 8]]] = 0.172**2
+            pvt[array(self.ik2)[[-2,-8]]] = 0.169**2
+            fbl = self.compute_bl(pvt)
+            ftr = self.compute_transit(pvt)
+
+            
     def set_pv_indices(self, sbl=None, swn=None):
         self.ik2 = [self._sk2+pbid for pbid in self.gpbids]
                         
@@ -149,8 +154,17 @@ class LPFC(LPF):
         
         swn = swn if swn is not None else self._swn
         self.iwn = [swn+ilc for ilc in range(self.nlc)]
-        
 
+
+    def setup_gp(self):
+        pass
+
+
+    def lnposterior(self, pv):
+        _k = sqrt(pv[self.ik2]).mean()
+        return super(LPFC,self).lnposterior(pv) + self.prior_kw.log(_k)                
+
+        
     def compute_transit(self, pv):
         _a  = as_from_rhop(pv[2], pv[1]) 
         _i  = mt.acos(pv[3]/_a) 
@@ -177,31 +191,6 @@ class LPFC(LPF):
         self._wrk_lc[1][:] = bl2*tr2/tr2.mean(0)
         return self._wrk_lc
 
-        
-    def bl_elevation(self, pv):
-        a = 0.
-        for i, (ib1,ib2) in enumerate(zip(self.ibe1,self.ibe2)):
-            b1, b2 = pv[[ib1,ib2]]
-            ma,mb = self.emaska[i], self.emaskb[i]
-            self._wrk_el[i][ma]  = a + b1*self.celevat[i][ma]
-            self._wrk_el[i][mb]  = a + b2*self.celevat[i][mb]
-        return self._wrk_el
-
-
-    def setup_gp(self):
-        self.gps = [GPT(t,f) for t,f in zip(self.rotang, self.fluxes)]
-        [gp.compute([-2.8, 0.06, -3.2]) for i,gp in enumerate(self.gps)]
-        
-
-    def compute_baseline(self, pv):
-        #bl_e = self.bl_elevation(pv)
-        #bl_r = self.bl_rotang(pv)
-        #return [pv[icn] + be + br for icn,be,br in zip(self.ibcn,bl_e,bl_r)]
-        return [pv[icn] + pv[ibe]*tc for icn,ibe,tc in zip(self.ibcn,self.ibe1,self.ctimes)]
-
-#        return [pv[ia] + pv[ib]*t + pv[iz]*(z-1.25)+self.rafun(r, pv) for ia,ib,iz,t,r,z in 
-#                zip(self.ibla,self.iblb,self.ibld,self.ctimes,self.rotang,self.airmass)]
-
 
     def compute_baseline(self, pv):
         bl1 = pv[self.ibcn[:self.npb]][:,newaxis] + pv[self.ibtl[:self.npb]][:,newaxis] * self.ctimes[0] + pv[self.ibel[:self.npb]][:,newaxis] * self.celevat[0]
@@ -213,9 +202,3 @@ class LPFC(LPF):
         fluxes_m = self.compute_lc_model(pv)
         return (sum([ll_normal_es(fo, fm, wn) for fo,fm,wn in zip(self.fluxes[:self.npb], fluxes_m[0], pv[self.iwn[:self.npb]])]) +
                 sum([ll_normal_es(fo, fm, wn) for fo,fm,wn in zip(self.fluxes[self.npb:], fluxes_m[1], pv[self.iwn[self.npb:]])]) )
-
-    def lnlikelihood_rn(self, pv):
-        #[gp.compute(pv[self._slgp]) for i,gp in enumerate(self.gps)]
-        flux_m = self.compute_lc_model(pv)
-        return sum([gp.gp.lnlikelihood(fo-fm) for gp,fo,fm in zip(self.gps,self.fluxes,flux_m)])
-    
