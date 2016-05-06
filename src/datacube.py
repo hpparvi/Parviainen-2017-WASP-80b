@@ -126,7 +126,7 @@ class DataCube(object):
     
     @property
     def sky(self):
-        return self._sky if self.apply_sky else 0.
+        return self._sky if self.apply_sky else np.zeros_like(self._sky)
 
     
     def trace_spectrum(self):
