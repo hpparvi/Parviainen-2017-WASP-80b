@@ -98,7 +98,9 @@ class LogPosteriorFunction(object):
                         
         self.iq1 = [self._sq1+pbid*2 for pbid in self.gpbids]
         self.iq2 = [self._sq2+pbid*2 for pbid in self.gpbids]
-        
+        self.uq1 = np.unique(self.iq1)
+        self.uq2 = np.unique(self.iq2)
+
         sbl = sbl if sbl is not None else self._sbl
         self.ibl = [sbl+ilc for ilc in range(self.nlc)]
         
@@ -134,10 +136,7 @@ class LogPosteriorFunction(object):
     def lnlikelihood_ld(self, pv):
         if self.use_ldtk:
             uv = zeros([self.npb,2])
-            q1 = pv[self._sq1:self._sq1+2*self.npb:2]
-            q2 = pv[self._sq2:self._sq2+2*self.npb:2]
-
-            a,b = sqrt(q1), 2*q2
+            a,b = sqrt(pv[self.uq1]), 2.*pv[self.uq2]
             uv[:,0] = a*b
             uv[:,1] = a*(1.-b)
             return self.lp.lnlike_qd(uv)
