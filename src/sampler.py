@@ -54,7 +54,9 @@ class Sampler(object):
     def optimise(self, niter, population=None, cont=True):
         if population is not None:
             self.de._population[:] = population
-        
+        else:
+            self.de._population[:] = self.lpf.fit_baseline(self.de.population)
+
         try:
             for i,r in enumerate(self.de(niter)):
                 if update(i, self.de_iupdate):
