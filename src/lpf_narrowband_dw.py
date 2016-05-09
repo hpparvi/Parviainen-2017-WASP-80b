@@ -11,66 +11,68 @@ from extcore import *
 
 class LPFC(LPF):
     def __init__(self, use_ldtk=False, n_threads=4, test=False):
-        self.df1 = df1 = pd.merge(pd.read_hdf('../data/aux.h5','night1'),
-                                  pd.read_hdf('../results/gtc_light_curves.h5','night1'),
-                                  left_index=True, right_index=True)
-        self.df2 = df2 = pd.merge(pd.read_hdf('../data/aux.h5','night2'),
+        self.night = 2
+        self.df = df = pd.merge(pd.read_hdf('../data/aux.h5','night2'),
                                   pd.read_hdf('../results/gtc_light_curves.h5','night2'),
                                   left_index=True, right_index=True)
 
-        cols = [c for c in self.df1.columns if 'relative_nb' in c]
+        cols = [c for c in df.columns if 'relative_nb' in c]
         pbs = [c[-4:] for c in cols]
         npb = len(pbs)
 
-        times  = npb*[df1.bjd.values-TZERO]+npb*[df2.bjd.values-TZERO]
-        fluxes = (list(df1[cols].values.T) + list(df2[cols].values.T))
+        cref = [c for c in df.columns if 'comparison_nb' in c]
+        ctrg = [c for c in df.columns if 'target_nb' in c]
+        
+        times  = npb*[df.bjd.values-TZERO]
+        #fluxes = list(df[cols].values.T)
+
+        fref = df[cref].values.T
+        ftrg = df[ctrg].values.T
+
+        fluxes = map(N, list(ftrg / fref.mean(0)))
         
         ## Mask outliers
         ## -------------
-        self.masks = masks = []
-        for j in range(2):
-            lim = 0.006
-            mask = ones(fluxes[npb*j].size, np.bool)
-            for i in range(npb):
-                f = fluxes[i+npb*j]
-                mask &= abs(f-MF(f,11)) < lim
-            if j==0:
-                mask &= (times[0] < 855.528) | (times[0] > 855.546)
-            self.masks.append(mask)
+        lim = 0.006
+        self.mask = ones(fluxes[0].size, np.bool)
+        for i in range(npb):
+            f = fluxes[i]
+            self.mask &= abs(f-MF(f,11)) < lim
+            if self.night == 1:
+                self.mask &= (times[0] < 855.528) | (times[0] > 855.546)
 
-        times   = [times[i][masks[i//npb]]  for i in range(2*npb)]
-        fluxes  = [fluxes[i][masks[i//npb]] for i in range(2*npb)]
+        times   = [times[i][self.mask]  for i in range(npb)]
+        fluxes  = [fluxes[i][self.mask] for i in range(npb)]
 
         fc = pd.read_hdf(RFILE_EXT, 'vkrn_ldtk/fc')
         self.otmasks = [abs(fold(t, fc.p.mean(), fc.tc.mean(), 0.5)-0.5) < 0.0134 for t in times]
-        self.rotang  = npb*[df1.rotang[masks[0]].values]  + npb*[df2.rotang[masks[1]].values]
-        self.elevat  = npb*[df1.elevat[masks[0]].values]  + npb*[df2.elevat[masks[1]].values]
-        self.airmass = npb*[df1.airmass[masks[0]].values] + npb*[df2.airmass[masks[1]].values]
+        self.rotang  = df.rotang[self.mask].values
+        self.elevat  = df.elevat[self.mask].values
+        self.airmass = df.airmass[self.mask].values
         self.ctimes  = [t-t.mean() for t in times]
         
         ## Stuff for the rotator angle dependent baseline
-        self._wrk_ra =  [zeros_like(r) for r in self.rotang]
+        self._wrk_ra =  zeros_like(self.rotang)
 
         ## Stuff for the elevation dependent baseline
         ## ------------------------------------------
-        self._wrk_el = [zeros_like(e) for e in self.elevat]
-        self.celevat = [e-59.25 for e in self.elevat]
-        self.emaska  = [t < t[argmax(e)] for e,t in zip(self.elevat,times)]
-        self.emaskb  = [~m for m in self.emaska]
+        self._wrk_el = zeros_like(self.elevat)
+        self.celevat = self.elevat-59.25
+        self.emaska  = times < t[argmax(self.elevat)]
+        self.emaskb  = ~self.emaska
         
         ## Initialise the parent
         ## ---------------------
-        super(LPFC,self).__init__(times, fluxes, 2*pbs,
+        super(LPFC,self).__init__(times, fluxes, pbs,
                                   use_ldtk=False, constant_k=False, noise='white',
                                   ldf_path='../data/external_lcs.h5', nthreads=n_threads)
         self.use_ldtk = use_ldtk
 
         self.fluxes_o = copy(self.fluxes)
-        self.fluxes_m = npb*[mean(self.fluxes[:npb], 0)] + npb*[mean(self.fluxes[npb:], 0)] 
+        self.fluxes_m = npb*[mean(self.fluxes[:npb], 0)]
         self.fluxes = [f/fm for f,fm in zip(self.fluxes, self.fluxes_m)]
         
-        self._wrk_lc = (zeros([self.npb,self.fluxes[0].size]),
-                        zeros([self.npb,self.fluxes[self.npb].size]))
+        self._wrk_lc = zeros([self.npb,self.fluxes[0].size])
 
         ## Setup priors
         ## ------------
@@ -99,9 +101,11 @@ class LPFC(LPF):
         ## --------
         self._sbl = len(self.priors)
         for ilc in range(self.nlc):
-            self.priors.append(UP( 0.97, 1.04, 'bcn_%i'%ilc)) ##  sbl + ilc -- Baseline constant
-            self.priors.append(UP(-1e-1, 1e-1, 'btl_%i'%ilc)) ##  sbl + ilc -- Linear time trend
-            self.priors.append(UP(-5e-2, 3e-2, 'bel_%i'%ilc)) ##  sbl + ilc -- Linear elevation trend
+            self.priors.append(UP( 0.60, 2.00, 'bcn_%i'%ilc)) ##  sbl + ilc -- Baseline constant
+            self.priors.append(UP(-1e-0, 1e-0, 'btl_%i'%ilc)) ##  sbl + ilc -- Linear time trend
+            self.priors.append(UP(-1.00, 1.00, 'bal_%i'%ilc)) ##  sbl + ilc -- Linear airmass trend
+            #self.priors.append(UP(-5e-1, 5e-1, 'baq_%i'%ilc)) ##  sbl + ilc -- Quadratic airmass trend
+            
 
         ## White noise
         ## -----------
@@ -153,7 +157,8 @@ class LPFC(LPF):
         sbl = sbl if sbl is not None else self._sbl
         self.ibcn = [sbl+3*ilc   for ilc in range(self.nlc)]
         self.ibtl = [sbl+3*ilc+1 for ilc in range(self.nlc)]
-        self.ibel = [sbl+3*ilc+2 for ilc in range(self.nlc)]
+        self.ibal = [sbl+3*ilc+2 for ilc in range(self.nlc)]
+        #self.ibaq = [sbl+4*ilc+3 for ilc in range(self.nlc)]
         
         swn = swn if swn is not None else self._swn
         self.iwn = [swn+ilc for ilc in range(self.nlc)]
@@ -178,38 +183,31 @@ class LPFC(LPF):
         self._wrk_ld[:,0] = a*b
         self._wrk_ld[:,1] = a*(1.-b)
 
-        z1 = of.z_circular(self.times[0], pv[0], pv[1], _a, _i, self.nt) 
-        z2 = of.z_circular(self.times[self.npb], pv[0], pv[1], _a, _i, self.nt) 
-
-        f1 = self.tm(z1, _k, self._wrk_ld[:self.npb])
-        f2 = self.tm(z2, _k, self._wrk_ld[self.npb:])
-
-        return (kf[self.npb:]*(f1-1.)+1.).T, (kf[:self.npb]*(f2-1.)+1.).T
+        z = of.z_circular(self.times[0], pv[0], pv[1], _a, _i, self.nt) 
+        f = self.tm(z, _k, self._wrk_ld)
+        return (kf*(f-1.)+1.).T
         
 
     def compute_lc_model(self, pv, copy=False):
-        bl1,bl2 = self.compute_baseline(pv)
-        tr1,tr2 = self.compute_transit(pv)
-        self._wrk_lc[0][:] = bl1*tr1/tr1.mean(0)
-        self._wrk_lc[1][:] = bl2*tr2/tr2.mean(0)
-        return self._wrk_lc if not copy else (self._wrk_lc[0].copy(), self._wrk_lc[1].copy())
+        bl = self.compute_baseline(pv)
+        tr = self.compute_transit(pv)
+        self._wrk_lc[:] = bl*tr/tr.mean(0)
+        return self._wrk_lc if not copy else self._wrk_lc.copy()
 
 
     def compute_baseline(self, pv):
-        bl1 = pv[self.ibcn[:self.npb]][:,newaxis] + pv[self.ibtl[:self.npb]][:,newaxis] * self.ctimes[0] + pv[self.ibel[:self.npb]][:,newaxis] * self.airmass[0]
-        bl2 = pv[self.ibcn[self.npb:]][:,newaxis] + pv[self.ibtl[self.npb:]][:,newaxis] * self.ctimes[self.npb] + pv[self.ibel[self.npb:]][:,newaxis] * self.airmass[self.npb]
-        return bl1, bl2
+        bl = pv[self.ibcn][:,newaxis] + pv[self.ibtl][:,newaxis] * self.ctimes[0] + pv[self.ibal][:,newaxis] * self.airmass #+ pv[self.ibaq][:,newaxis] * self.airmass**2
+        return bl
 
 
     def lnlikelihood_wn(self, pv):
         fluxes_m = self.compute_lc_model(pv)
-        return (sum([ll_normal_es(fo, fm, wn) for fo,fm,wn in zip(self.fluxes[:self.npb], fluxes_m[0], pv[self.iwn[:self.npb]])]) +
-                sum([ll_normal_es(fo, fm, wn) for fo,fm,wn in zip(self.fluxes[self.npb:], fluxes_m[1], pv[self.iwn[self.npb:]])]) )
+        return sum([ll_normal_es(fo, fm, wn) for fo,fm,wn in zip(self.fluxes, fluxes_m, pv[self.iwn])])
 
 
     def fit_baseline(self, pvpop):
         def baseline(pv, ilc):
-            return pv[0] + pv[1]*self.ctimes[ilc] + pv[2]*self.airmass[ilc]
+            return pv[0] + pv[1]*self.ctimes[0] + pv[2]*self.airmass #+ pv[3]*self.airmass**2
 
         pvt = pvpop.copy()
         for i in range(self.nlc):
@@ -218,5 +216,17 @@ class LPFC(LPF):
                        [1,0,0], disp=False, ftol=1e-9, xtol=1e-9)
             pvt[:,self.ibcn[i]] = normal(pv0[0], 0.001,           size=pvt.shape[0])
             pvt[:,self.ibtl[i]] = normal(pv0[1], 0.1*abs(pv0[1]), size=pvt.shape[0])
-            pvt[:,self.ibel[i]] = normal(pv0[2], 0.1*abs(pv0[2]), size=pvt.shape[0])
+            pvt[:,self.ibal[i]] = normal(pv0[2], 0.01*abs(pv0[2]), size=pvt.shape[0])
+            #pvt[:,self.ibaq[i]] = normal(pv0[3], 0.01*abs(pv0[3]), size=pvt.shape[0])
+        return pvt
+
+
+    def fit_ldc(self, pvpop, emul=1.):
+        pvt = pvpop.copy()
+        uv, uve = self.lp.coeffs_qd()
+        us = array([normal(um, emul*ue, size=pvt.shape[0]) for um,ue in zip(uv[:,0],uve[:,0])]).T
+        vs = array([normal(vm, emul*ve, size=pvt.shape[0]) for vm,ve in zip(uv[:,1],uve[:,1])]).T
+        q1s, q2s = map_uv_to_qq(us, vs)
+        pvt[:, self.iq1] = q1s
+        pvt[:, self.iq2] = q2s
         return pvt

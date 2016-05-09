@@ -56,6 +56,8 @@ class Sampler(object):
             self.de._population[:] = population
         else:
             self.de._population[:] = self.lpf.fit_baseline(self.de.population)
+            if self.lpf.use_ldtk:
+                self.de._population[:] = self.lpf.fit_ldc(self.de.population, emul=2.)
 
         try:
             for i,r in enumerate(self.de(niter)):

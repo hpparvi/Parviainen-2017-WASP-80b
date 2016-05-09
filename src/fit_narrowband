@@ -35,7 +35,7 @@ if __name__ == '__main__':
     nnames = dict(white='wn', red='rn', white_t='wnt')
     
     rname = args.run_name
-    fname = join(DRESULT, 'gtc_nb_{:s}{:s}'.format(nnames[args.noise],
+    fname = join(DRESULT, 'gtc_nb_{:s}{:s}_n2'.format(nnames[args.noise],
                                                       '_ldtk' if args.use_ldtk else ''))
     de_file = fname+'_de.npz'
     mc_file = fname+'_mc.npz'
