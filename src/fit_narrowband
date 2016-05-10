@@ -6,15 +6,16 @@ from os.path import exists
 
 from core import *
 from sampler import Sampler
-from lpf_narrowband_dw  import LPFC as LPFWN
-from lpf_narrowband_dwt import LPFC as LPFWNT
+from lpf_narrowband_wn  import LPFC as LPFWN
+from lpf_narrowband_dw  import LPFC as LPFDW
+from lpf_narrowband_dwt import LPFC as LPFDWT
 from lpf_narrowband_gp  import LPFC as LPFRN
 
 if __name__ == '__main__':
     ap = ArgumentParser()
     ap.add_argument('--run-name', default='vk')
     ap.add_argument('--use-ldtk', action='store_true', default=False)
-    ap.add_argument('--noise', choices=['white','red','white_t'], default='white')
+    ap.add_argument('--noise', choices=['white', 'red', 'dw', 'dwt'], default='white')
     ap.add_argument('--n-walkers',       type=int, default=600)
     ap.add_argument('--n-threads',       type=int, default=4)
     ap.add_argument('--do-de', action='store_true', default=False)
@@ -32,7 +33,7 @@ if __name__ == '__main__':
     ap.add_argument('--mc-update-interval', type=int, default=  10)
     args = ap.parse_args()
 
-    nnames = dict(white='wn', red='rn', white_t='wnt')
+    nnames = dict(white='wn', red='rn', dw='dw', dwt='dwt')
     
     rname = args.run_name
     fname = join(DRESULT, 'gtc_nb_{:s}{:s}_n2'.format(nnames[args.noise],
@@ -45,8 +46,10 @@ if __name__ == '__main__':
 
     if args.noise == 'white':
         lpf = LPFWN(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
-    if args.noise == 'white_t':
-        lpf = LPFWNT(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
+    if args.noise == 'dw':
+        lpf = LPFDW(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
+    if args.noise == 'dw_t':
+        lpf = LPFDWT(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
     elif args.noise == 'red':
         lpf = LPFRN(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
         
