@@ -18,6 +18,7 @@ if __name__ == '__main__':
     ap.add_argument('--noise', choices=['white', 'red', 'dw', 'dwt'], default='white')
     ap.add_argument('--n-walkers',       type=int, default=600)
     ap.add_argument('--n-threads',       type=int, default=4)
+    ap.add_argument('--night',           type=int, default=2)
     ap.add_argument('--do-de', action='store_true', default=False)
     ap.add_argument('--do-mc', action='store_true', default=False)
     ap.add_argument('--dont-continue-de', dest='continue_de', action='store_false', default=True)
@@ -36,8 +37,12 @@ if __name__ == '__main__':
     nnames = dict(white='wn', red='rn', dw='dw', dwt='dwt')
     
     rname = args.run_name
-    fname = join(DRESULT, 'gtc_nb_{:s}{:s}_n2'.format(nnames[args.noise],
-                                                      '_ldtk' if args.use_ldtk else ''))
+    if args.noise == 'dw':
+        fname = join(DRESULT, 'gtc_nb_{:s}{:s}_n{:1d}'.format(nnames[args.noise],
+                                                        '_ldtk' if args.use_ldtk else '', args.night))
+    else:
+        fname = join(DRESULT, 'gtc_nb_{:s}{:s}'.format(nnames[args.noise],
+                                                        '_ldtk' if args.use_ldtk else ''))
     de_file = fname+'_de.npz'
     mc_file = fname+'_mc.npz'
 
@@ -47,8 +52,8 @@ if __name__ == '__main__':
     if args.noise == 'white':
         lpf = LPFWN(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
     if args.noise == 'dw':
-        lpf = LPFDW(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
-    if args.noise == 'dw_t':
+        lpf = LPFDW(use_ldtk=args.use_ldtk, n_threads=args.n_threads, night=args.night)
+    if args.noise == 'dwt':
         lpf = LPFDWT(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
     elif args.noise == 'red':
         lpf = LPFRN(use_ldtk=args.use_ldtk, n_threads=args.n_threads)

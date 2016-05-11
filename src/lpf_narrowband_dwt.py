@@ -4,6 +4,7 @@ from numpy import *
 
 from scipy.signal import medfilt as MF
 from scipy.stats import scoreatpercentile as sap
+from numpy.random import normal
 
 from core import *
 from extcore import *
@@ -99,9 +100,9 @@ class LPFC(LPF):
         ## --------
         self._sbl = len(self.priors)
         for ilc in range(self.nlc):
-            self.priors.append(UP( 0.98, 1.02, 'bcn_%i'%ilc)) ##  sbl + ilc -- Baseline constant
-            self.priors.append(UP(-1e-1, 1e-1, 'btl_%i'%ilc)) ##  sbl + ilc -- Linear time trend
-            self.priors.append(UP(-1.5e-3, 2.5e-3, 'bel_%i'%ilc)) ##  sbl + ilc -- Linear elevation trend
+            self.priors.append(UP( 0.0, 2.0, 'bcn_%i'%ilc)) ##  sbl + ilc -- Baseline constant
+            self.priors.append(UP(-1.0, 1.0, 'btl_%i'%ilc)) ##  sbl + ilc -- Linear time trend
+            self.priors.append(UP(-1.0, 1.0, 'bal_%i'%ilc)) ##  sbl + ilc -- Linear airmass trend
 
         ## White noise
         ## -----------
@@ -131,7 +132,7 @@ class LPFC(LPF):
             self.filters = pb_filters_nb
             self.sc = LDPSetCreator([4150,100], [4.6,0.2], [-0.14,0.16], self.filters)
             self.lp = self.sc.create_profiles(2000)
-            self.lp.set_uncertainty_multiplier(2)
+            #self.lp.set_uncertainty_multiplier(2)
             
         if test:
             self.test_pv = pvt = np.load('test_pv.npz')['pv']
@@ -147,11 +148,13 @@ class LPFC(LPF):
                         
         self.iq1 = [self._sq1+pbid*2 for pbid in self.gpbids]
         self.iq2 = [self._sq2+pbid*2 for pbid in self.gpbids]
+        self.uq1 = np.unique(self.iq1)
+        self.uq2 = np.unique(self.iq2)
         
         sbl = sbl if sbl is not None else self._sbl
         self.ibcn = [sbl+3*ilc   for ilc in range(self.nlc)]
         self.ibtl = [sbl+3*ilc+1 for ilc in range(self.nlc)]
-        self.ibel = [sbl+3*ilc+2 for ilc in range(self.nlc)]
+        self.ibal = [sbl+3*ilc+2 for ilc in range(self.nlc)]
         
         swn = swn if swn is not None else self._swn
         self.iwn = [swn+ilc for ilc in range(self.nlc)]
@@ -194,8 +197,8 @@ class LPFC(LPF):
 
 
     def compute_baseline(self, pv):
-        bl1 = pv[self.ibcn[:self.npb]][:,newaxis] + pv[self.ibtl[:self.npb]][:,newaxis] * self.ctimes[0] + pv[self.ibel[:self.npb]][:,newaxis] * self.celevat[0]
-        bl2 = pv[self.ibcn[self.npb:]][:,newaxis] + pv[self.ibtl[self.npb:]][:,newaxis] * self.ctimes[self.npb] + pv[self.ibel[self.npb:]][:,newaxis] * self.celevat[self.npb]
+        bl1 = pv[self.ibcn[:self.npb]][:,newaxis] + pv[self.ibtl[:self.npb]][:,newaxis] * self.ctimes[0] + pv[self.ibal[:self.npb]][:,newaxis] * self.airmass[0]
+        bl2 = pv[self.ibcn[self.npb:]][:,newaxis] + pv[self.ibtl[self.npb:]][:,newaxis] * self.ctimes[self.npb] + pv[self.ibal[self.npb:]][:,newaxis] * self.airmass[self.npb]
         return bl1, bl2
 
 
@@ -203,3 +206,29 @@ class LPFC(LPF):
         fluxes_m = self.compute_lc_model(pv)
         return (sum([ll_normal_es(fo, fm, wn) for fo,fm,wn in zip(self.fluxes[:self.npb], fluxes_m[0], pv[self.iwn[:self.npb]])]) +
                 sum([ll_normal_es(fo, fm, wn) for fo,fm,wn in zip(self.fluxes[self.npb:], fluxes_m[1], pv[self.iwn[self.npb:]])]) )
+
+
+    def fit_baseline(self, pvpop):
+        def baseline(pv, ilc):
+            return pv[0] + pv[1]*self.ctimes[ilc] + pv[2]*self.airmass[ilc] 
+
+        pvt = pvpop.copy()
+        for i in range(self.nlc):
+            m = ~self.otmasks[i]
+            pv0 = fmin(lambda pv: ((self.fluxes[i][m]-baseline(pv,i)[m])**2).sum(), 
+                       [1,0,0], disp=False, ftol=1e-9, xtol=1e-9)
+            pvt[:,self.ibcn[i]] = normal(pv0[0], 0.001,            size=pvt.shape[0])
+            pvt[:,self.ibtl[i]] = normal(pv0[1], 0.01*abs(pv0[1]), size=pvt.shape[0])
+            pvt[:,self.ibal[i]] = normal(pv0[2], 0.01*abs(pv0[2]), size=pvt.shape[0])
+        return pvt
+
+
+    def fit_ldc(self, pvpop, emul=1.):
+        pvt = pvpop.copy()
+        uv, uve = self.lp.coeffs_qd()
+        us = array([normal(um, emul*ue, size=pvt.shape[0]) for um,ue in zip(uv[:,0],uve[:,0])]).T
+        vs = array([normal(vm, emul*ve, size=pvt.shape[0]) for vm,ve in zip(uv[:,1],uve[:,1])]).T
+        q1s, q2s = map_uv_to_qq(us, vs)
+        pvt[:, self.uq1] = q1s
+        pvt[:, self.uq2] = q2s
+        return pvt

@@ -10,10 +10,10 @@ from core import *
 from extcore import *
 
 class LPFC(LPF):
-    def __init__(self, use_ldtk=False, n_threads=4, test=False):
-        self.night = 2
-        self.df = df = pd.merge(pd.read_hdf('../data/aux.h5','night2'),
-                                  pd.read_hdf('../results/gtc_light_curves.h5','night2'),
+    def __init__(self, use_ldtk=False, n_threads=4, night=2, test=False):
+        self.night = night
+        self.df = df = pd.merge(pd.read_hdf('../data/aux.h5','night%i'%night),
+                                  pd.read_hdf('../results/gtc_light_curves.h5','night%i'%night),
                                   left_index=True, right_index=True)
 
         cols = [c for c in df.columns if 'relative_nb' in c]
@@ -24,12 +24,10 @@ class LPFC(LPF):
         ctrg = [c for c in df.columns if 'target_nb' in c]
         
         times  = npb*[df.bjd.values-TZERO]
-        #fluxes = list(df[cols].values.T)
-
         fref = df[cref].values.T
         ftrg = df[ctrg].values.T
-
-        fluxes = map(N, list(ftrg / fref.mean(0)))
+        #fluxes = map(N, list(ftrg / fref.mean(0)))
+        fluxes = map(lambda a: a/median(a[:25]), list(ftrg))
         
         ## Mask outliers
         ## -------------
@@ -38,8 +36,8 @@ class LPFC(LPF):
         for i in range(npb):
             f = fluxes[i]
             self.mask &= abs(f-MF(f,11)) < lim
-            if self.night == 1:
-                self.mask &= (times[0] < 855.528) | (times[0] > 855.546)
+            #if self.night == 1:
+            #    self.mask &= (times[0] < 855.528) | (times[0] > 855.546)
 
         times   = [times[i][self.mask]  for i in range(npb)]
         fluxes  = [fluxes[i][self.mask] for i in range(npb)]
@@ -101,11 +99,9 @@ class LPFC(LPF):
         ## --------
         self._sbl = len(self.priors)
         for ilc in range(self.nlc):
-            self.priors.append(UP( 0.60, 2.00, 'bcn_%i'%ilc)) ##  sbl + ilc -- Baseline constant
-            self.priors.append(UP(-1e-0, 1e-0, 'btl_%i'%ilc)) ##  sbl + ilc -- Linear time trend
-            self.priors.append(UP(-1.00, 1.00, 'bal_%i'%ilc)) ##  sbl + ilc -- Linear airmass trend
-            #self.priors.append(UP(-5e-1, 5e-1, 'baq_%i'%ilc)) ##  sbl + ilc -- Quadratic airmass trend
-            
+            self.priors.append(UP( 0.0, 2.0, 'bcn_%i'%ilc)) ##  sbl + ilc -- Baseline constant
+            self.priors.append(UP(-1.0, 1.0, 'btl_%i'%ilc)) ##  sbl + ilc -- Linear time trend
+            self.priors.append(UP(-1.0, 1.0, 'bal_%i'%ilc)) ##  sbl + ilc -- Linear airmass trend
 
         ## White noise
         ## -----------
@@ -158,7 +154,6 @@ class LPFC(LPF):
         self.ibcn = [sbl+3*ilc   for ilc in range(self.nlc)]
         self.ibtl = [sbl+3*ilc+1 for ilc in range(self.nlc)]
         self.ibal = [sbl+3*ilc+2 for ilc in range(self.nlc)]
-        #self.ibaq = [sbl+4*ilc+3 for ilc in range(self.nlc)]
         
         swn = swn if swn is not None else self._swn
         self.iwn = [swn+ilc for ilc in range(self.nlc)]
@@ -196,7 +191,7 @@ class LPFC(LPF):
 
 
     def compute_baseline(self, pv):
-        bl = pv[self.ibcn][:,newaxis] + pv[self.ibtl][:,newaxis] * self.ctimes[0] + pv[self.ibal][:,newaxis] * self.airmass #+ pv[self.ibaq][:,newaxis] * self.airmass**2
+        bl = pv[self.ibcn][:,newaxis] + pv[self.ibtl][:,newaxis] * self.ctimes[0] + pv[self.ibal][:,newaxis] * self.airmass
         return bl
 
 
@@ -214,10 +209,9 @@ class LPFC(LPF):
             m = ~self.otmasks[i]
             pv0 = fmin(lambda pv: ((self.fluxes[i][m]-baseline(pv,i)[m])**2).sum(), 
                        [1,0,0], disp=False, ftol=1e-9, xtol=1e-9)
-            pvt[:,self.ibcn[i]] = normal(pv0[0], 0.001,           size=pvt.shape[0])
-            pvt[:,self.ibtl[i]] = normal(pv0[1], 0.1*abs(pv0[1]), size=pvt.shape[0])
+            pvt[:,self.ibcn[i]] = normal(pv0[0], 0.001,            size=pvt.shape[0])
+            pvt[:,self.ibtl[i]] = normal(pv0[1], 0.01*abs(pv0[1]), size=pvt.shape[0])
             pvt[:,self.ibal[i]] = normal(pv0[2], 0.01*abs(pv0[2]), size=pvt.shape[0])
-            #pvt[:,self.ibaq[i]] = normal(pv0[3], 0.01*abs(pv0[3]), size=pvt.shape[0])
         return pvt
 
 
