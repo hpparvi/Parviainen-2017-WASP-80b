@@ -9,13 +9,14 @@ from sampler import Sampler
 from lpf_narrowband_wn  import LPFC as LPFWN
 from lpf_narrowband_dw  import LPFC as LPFDW
 from lpf_narrowband_dwt import LPFC as LPFDWT
+from lpf_dwt import LPFC as LPFDWTA
 from lpf_narrowband_gp  import LPFC as LPFRN
 
 if __name__ == '__main__':
     ap = ArgumentParser()
     ap.add_argument('--run-name', default='vk')
     ap.add_argument('--use-ldtk', action='store_true', default=False)
-    ap.add_argument('--noise', choices=['white', 'red', 'dw', 'dwt'], default='white')
+    ap.add_argument('--noise', choices=['white', 'red', 'dw', 'dwt', 'dwta'], default='white')
     ap.add_argument('--n-walkers',       type=int, default=600)
     ap.add_argument('--n-threads',       type=int, default=4)
     ap.add_argument('--night',           type=int, default=2)
@@ -34,7 +35,7 @@ if __name__ == '__main__':
     ap.add_argument('--mc-update-interval', type=int, default=  10)
     args = ap.parse_args()
 
-    nnames = dict(white='wn', red='rn', dw='dw', dwt='dwt')
+    nnames = dict(white='wn', red='rn', dw='dw', dwt='dwt', dwta='dwta')
     
     rname = args.run_name
     if args.noise == 'dw':
@@ -51,13 +52,15 @@ if __name__ == '__main__':
 
     if args.noise == 'white':
         lpf = LPFWN(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
-    if args.noise == 'dw':
+    elif args.noise == 'dw':
         lpf = LPFDW(use_ldtk=args.use_ldtk, n_threads=args.n_threads, night=args.night)
-    if args.noise == 'dwt':
+    elif args.noise == 'dwt':
         lpf = LPFDWT(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
     elif args.noise == 'red':
         lpf = LPFRN(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
-        
+    elif args.noise == 'dwta':
+        lpf = LPFDWTA(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
+
     sampler = Sampler(fname, rname, lpf, args.n_walkers, mc_thin=args.mc_thin,
                       mc_nruns=args.mc_n_runs, notebook=False,
                       de_iupdate=args.de_update_interval, de_isave=args.de_save_interval,
