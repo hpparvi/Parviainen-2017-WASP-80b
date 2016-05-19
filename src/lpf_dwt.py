@@ -140,6 +140,7 @@ class LPFC(LPF):
             self.filters = pb_filters_nb + filters_bb + pb_filters_k + pb_filters_na
             self.sc = LDPSetCreator([4150,100], [4.6,0.2], [-0.14,0.16], self.filters)
             self.lp = self.sc.create_profiles(2000)
+            self.lp.resample_linear_z()
             #self.lp.set_uncertainty_multiplier(2)
             
         if test:
