@@ -49,26 +49,12 @@ if __name__ == '__main__':
         lpf = LPFSR(use_ldtk=args.use_ldtk, n_threads=args.n_threads, night=args.night)
     else:
         lpf = LPFMR(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
-                
-    # if args.noise == 'white':
-    #     lpf = LPFWN(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
-    # elif args.noise == 'dw':
-    #     lpf = 
-    # elif args.noise == 'dwt':
-    #     lpf = LPFDWT(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
-    # elif args.noise == 'red':
-    #     lpf = LPFRN(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
-    # elif args.noise == 'dwta':
-    #     lpf = LPFDWTA(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
 
     sampler = Sampler(fname, rname, lpf, args.n_walkers, mc_thin=args.mc_thin,
                       mc_nruns=args.mc_n_runs, notebook=False,
                       de_iupdate=args.de_update_interval, de_isave=args.de_save_interval,
                       mc_iupdate=args.mc_update_interval, mc_isave=args.mc_save_interval)
 
-    #if args.noise == 'red':
-    #    sampler.de.C = 0.25
-    
     sampler.info('Saving results to %s', relpath(fname))
     sampler.info('Run name %s', rname)
     sampler.info('Population size %i', args.n_walkers)
