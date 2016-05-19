@@ -110,6 +110,7 @@ l_bias = [sorted(glob(join(db,'*.fits'))) for db in DBIAS]
 l_arc  = [sorted(glob(join(da,'*.fits'))) for da in DARC]
 l_obj  = [sorted(glob(join(do, '*.fits')))[2:] for do in DOBJ]
 
+DFILE_EXT = abspath(join(W80ROOT,'data','external_lcs.h5'))
 DRESULT = join(W80ROOT, 'results')
 RFILE_EXT = abspath(join(DRESULT,'external.h5'))
 RFILE_GTC = abspath(join(DRESULT,'osiris.h5'))
@@ -181,18 +182,26 @@ class WhiteFilter(object):
 ## Passband definitions
 ## --------------------
 try:
-    dff = pd.read_hdf('../data/external_lcs.h5', 'transmission')
+    dff = pd.read_hdf(DFILE_EXT, 'transmission')
     pb_filters_bb = []
     for pb in 'g r i z'.split():
         pb_filters_bb.append(TabulatedFilter(pb, dff.index.values, tm=dff[pb].values))
 except IOError:
     pass
         
-pb_filters_nb = [GeneralGaussian('nb{:02d}'.format(i), 530+20*i, 10, 15) for i in range(20)]
-pb_filters_nb[11] = GeneralGaussian('nb11', 746.95, 7.25, 15)
-pb_filters_k  = [GeneralGaussian('K{:02d}'.format(i),  768.2+4*(i-5), 2, 15) for i in range(11)]
+pb_filters_nb = [GeneralGaussian('nb{:02d}'.format(i+1), 530+20*i, 10, 15) for i in range(20)]
+pb_filters_nb[11] = GeneralGaussian('nb12', 746.95, 7.25, 15)
+pb_filters_k  = [GeneralGaussian('K{:02d}'.format(i+1),  768.2+1.95+4*(i-5), 2, 15) for i in range(11)]
 pb_filters_k.pop(2)
-pb_filters_na = [GeneralGaussian('Na{:02d}'.format(i), 589.4+4*(i-5), 2, 15) for i in range(11)]
+pb_filters_k.pop(1)
+for i,f in enumerate(pb_filters_k):
+    f.name = 'K{:02d}'.format(i+1)
+    
+pb_filters_na = [GeneralGaussian('Na{:02d}'.format(i+1), 589.4+4*(i-5), 2, 15) for i in range(11)]
+pb_filters_na.pop(3)
+for i,f in enumerate(pb_filters_na):
+    f.name = 'Na{:02d}'.format(i+1)
+
 
 pb_centers_bb = [np.average(f.wl, weights=f(f.wl)) for f in pb_filters_bb]
 pb_centers_nb = [f.c for f in pb_filters_nb]
