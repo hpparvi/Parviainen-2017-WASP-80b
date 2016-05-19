@@ -158,7 +158,7 @@ sb.set_palette(cp)
 ## Potassium and Kalium resonance line centers [nm]
 ## ------------------------------------------------
 wlc_k  = array([766.5,769.9])
-wlc_na = array([589.4])
+wlc_na = array([589.0,589.6])
 
 class GeneralGaussian(object):
     def __init__(self, name, c, s, p):
@@ -188,7 +188,7 @@ pb_centers_nb = [f.c for f in pb_filters_nb]
 pb_centers_k  = [f.c for f in pb_filters_k]
 pb_centers_na = [f.c for f in pb_filters_na]
 
-c_passbands = 'w g r i z J H K'.split() + ['nb%02i'%i for i in range(21)]
+c_passbands = 'w g r i z J H K'.split() + ['nb%02i'%i for i in range(21)] + ['K%02i'%i for i in range(7)] +  ['Na%02i'%i for i in range(7)]
 
 def ccd_slice(run, width=50):
     df = pd.read_hdf('data/aux.h5',('jul16' if run==0 else 'aug25'))
