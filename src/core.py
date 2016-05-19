@@ -178,15 +178,32 @@ class WhiteFilter(object):
     def __call__(self, x):
         return np.sum([f(x) for f in self.filters], 0)
 
-## Narrow-band filters
-## -------------------
-pb_filters_nb = [GeneralGaussian('nb{:02d}'.format(i), 530+20*i, 10, 15) for i in range(19)]
-pb_filters_k  = [GeneralGaussian('K{:02d}'.format(i),  768.2+6*(i-3), 3, 15) for i in range(7)]
-pb_filters_na = [GeneralGaussian('Na{:02d}'.format(i), 589.4+6*(i-3), 3, 15) for i in range(7)]
+## Passband definitions
+## --------------------
+try:
+    dff = pd.read_hdf('../data/external_lcs.h5', 'transmission')
+    pb_filters_bb = []
+    for pb in 'g r i z'.split():
+        pb_filters_bb.append(TabulatedFilter(pb, dff.index.values, tm=dff[pb].values))
+except IOError:
+    pass
+        
+pb_filters_nb = [GeneralGaussian('nb{:02d}'.format(i), 530+20*i, 10, 15) for i in range(20)]
+pb_filters_nb[11] = GeneralGaussian('nb11', 746.95, 7.25, 15)
+pb_filters_k  = [GeneralGaussian('K{:02d}'.format(i),  768.2+4*(i-5), 2, 15) for i in range(11)]
+pb_filters_k.pop(2)
+pb_filters_na = [GeneralGaussian('Na{:02d}'.format(i), 589.4+4*(i-5), 2, 15) for i in range(11)]
 
+pb_centers_bb = [np.average(f.wl, weights=f(f.wl)) for f in pb_filters_bb]
 pb_centers_nb = [f.c for f in pb_filters_nb]
 pb_centers_k  = [f.c for f in pb_filters_k]
 pb_centers_na = [f.c for f in pb_filters_na]
+
+fs = [f(f.wl) for f in pb_filters_bb]
+fs = [np.where(f>0.01, f, np.nan) for f in fs]
+tt = [500]+[pb_filters_bb[0].wl[np.nanargmin(abs(fs[i+1]-fs[i]))] for i in range(3)]+[900]
+pb_bounds_bb = [(tt[i], tt[i+1]) for i in range(4)]
+
 
 c_passbands = 'w g r i z J H K'.split() + ['nb%02i'%i for i in range(21)] + ['K%02i'%i for i in range(7)] +  ['Na%02i'%i for i in range(7)]
 
