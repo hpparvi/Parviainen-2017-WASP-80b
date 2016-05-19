@@ -2,45 +2,45 @@ from core import *
 
 from numpy import load, median, std, ones, ones_like, average, linspace, argmax, inf, poly1d, polyfit, zeros, nan, full_like, log10, arange
 
-def create_dc(night, ccd, sl, istart=0, iend=1000):
-    dc = []
-    k = 'n%iccd%i'%(night,ccd)
-    for fo in l_obj[night-1][istart:iend]:
-        t = pf.getdata(fo, ext=ccd).astype(float64)[:,sl]-bias[k][:,np.newaxis]
-        dc.append(t)
-    return array(dc)
-
-def create_lc(night, ccd, sl, maxpts=50):
-    sp1, sp2 = [],[]
-    k = 'n%iccd%i'%(night,ccd)
-    for fo in l_obj[night-1][:maxpts]:
-        t = pf.getdata(fo, ext=ccd).astype(float64)[:,sl]-bias[k][:,np.newaxis]
-        sp1.append(t.mean(1))
-        t /= flats[k][:,sl]
-        sp2.append(t.mean(1))
-    return array(sp1), array(sp2)
-
 class DataCube(object):
     def __init__(self, night, ccd, filters, width=60, istart=0, iend=1000, force=False):
+        self.night = night
+        self.ccd   = ccd
+        self._id = nid = 'n%iccd%i'%(night,ccd)
         self._cname = 'dc_n%iccd%i.npy'%(night,ccd)
         
-        gain = pf.getval(l_obj[0][0], 'gain')
-        bias  = {k:v for k,v in load(f_bias_dn).items()}
-        flats = {k:v-bias[k][:,np.newaxis] for k,v in load(f_flats).items()}
-        flats = {k:v/median(v) for k,v in flats.items()}
-
-        self._sl  = ccd_slice(night-1, width)[ccd-1][1]
-        self._wls = load(join('results','wl_calibration.pkl'))['n%iccd%i'%(night,ccd)]
-        
         self.filters = filters
-        self.pixels = arange(2051)
+        self._sl  = ccd_slice(night-1, width)[ccd-1][1]
+
+        ## Load bias and the flatfield
+        ## ---------------------------
+        self.gain   = pf.getval(l_obj[night-1][ccd], 'gain')
+        self.bias   = load(f_bias_dn)[nid]
+        self._flat  = (load(f_flats)[nid] - self.bias[:,np.newaxis])[:,self._sl]
+        self._flat /= median(self._flat)
+
+        self._wls = load(join('results','wl_calibration.pkl'))[nid]
+        self.pixels = arange(self._flat.shape[0])
         self.wl = self._wls.pixel_to_wl(self.pixels)
             
+        ## Load the raw data
+        ## -----------------
+        ## Read the object subframe from each object file if a cache
+        ## file doesn't exist and we don't specially force the rereading
+        ## of the image frames.
+        ##
+        ## Note: we remove the bias automatically from the flat and 
+        ##       the object frames, but we don't apply flatfield
+        ##       correction unless the apply_flat flag is set.
+        ##
         if not exists(join('results',self._cname)) or force:
-            self._data  = create_dc(night, ccd, self._sl, istart, iend)
-            save(join('results',self._cname), self._data)
+            dc = []
+            for fo in l_obj[self.night-1][istart:iend]:
+                dc.append(pf.getdata(fo, ext=self.ccd).astype(np.float64)[:,self._sl] - self.bias[:,np.newaxis])
+            self._data  = array(dc)
+            np.save(join('results',self._cname), self._data)
         else:
-            self._data = load(join('results',self._cname))
+            self._data = np.load(join('results',self._cname))
             
         self.width  = width
         self.hwidth = width//2
@@ -49,18 +49,17 @@ class DataCube(object):
         self._mask  = abs(self._data - self._med) < 5*self._std
         self._spectrum_mask = ones(self._data.shape[1])
         
-        self._flat  = flats['n%iccd%i'%(night,ccd)][:,self._sl]
-        
         if ccd == 1:
-            self._sky = concatenate([self._data[:,:,:5],self._data[:,:,-10:]], 2)
+            self._sky = concatenate([self._data[:,:,:5],self._data[:,:,-10:]], 2).mean(2)
         if ccd == 2:
-            self._sky = concatenate([self._data[:,:,:10],self._data[:,:,-5:]], 2)
+            self._sky = concatenate([self._data[:,:,:10],self._data[:,:,-5:]], 2).mean(2)
             
+        ## Calculate sky
+        ## -------------
         msky = median(self._sky,0)
         vsky = 1.482*median(abs(self._sky-msky),0)
-        m = self._sky-msky > 5*vsky
-        self._sky[m] = MF(self._sky, 4)[m]
-        self._sky = self._sky.mean(2)
+        m = self._sky-msky > 10*vsky
+        self._sky = np.where(m, MF(self._sky, 4), self._sky)
         
         self.aperture = ones(self._data.shape[1:])
         self.apt_mf =  1. 
@@ -79,6 +78,15 @@ class DataCube(object):
         fm  = MF(f, 15)
         mad = median(abs(f-fm))
         self.mask = abs(f-fm) < 15*mad
+
+
+    def _create_dc(self, sl, istart=0, iend=1000):
+        dc = []
+        k = 'n%iccd%i'%(self.night, self.ccd)
+        for fo in l_obj[self.night-1][istart:iend]:
+            t = pf.getdata(fo, ext=self.ccd).astype(float64)[:,sl]-bias[k][:,np.newaxis]
+            dc.append(t)
+        return array(dc)
 
         
     def set_flags(self, afl=None, ams=None, aap=None, ask=None, asm=None):
@@ -103,7 +111,8 @@ class DataCube(object):
         if self.apply_aperture:
             pixel_weights *= self.aperture
             
-        self._cspectra = average(self._cdata,2,weights=pixel_weights)
+        self._cspectra = np.sum(self._cdata*pixel_weights, 2)
+        #self._cspectra = average(self._cdata,2,weights=pixel_weights)
             
         
     @property
