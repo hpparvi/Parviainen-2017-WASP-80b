@@ -6,16 +6,19 @@ from os.path import exists
 
 from core import *
 from sampler import Sampler
-from lpf_narrowband_wn  import LPFC as LPFWN
-from lpf_narrowband_dw  import LPFC as LPFDW
-from lpf_narrowband_dwt import LPFC as LPFDWT
-from lpf_dwt import LPFC as LPFDWTA
-from lpf_narrowband_gp  import LPFC as LPFRN
+#from lpf_narrowband_wn  import LPFC as LPFWN
+#from lpf_narrowband_dw  import LPFC as LPFDW
+#from lpf_dwt import LPFC as LPFDWTA
+#from lpf_narrowband_gp  import LPFC as LPFRN
+
+from lpf_singlerun import LPFC as LPFSR
+from lpf_multirun  import LPFC as LPFMR
 
 if __name__ == '__main__':
     ap = ArgumentParser()
-    ap.add_argument('--run-name', default='vk')
     ap.add_argument('--use-ldtk', action='store_true', default=False)
+    ap.add_argument('--passband', type=str, choices=['bb', 'nb', 'K', 'Na'])
+    ap.add_argument('--nights', type=str, choices=['1', '2', '12'])
     ap.add_argument('--noise', choices=['white', 'red', 'dw', 'dwt', 'dwta'], default='white')
     ap.add_argument('--n-walkers',       type=int, default=600)
     ap.add_argument('--n-threads',       type=int, default=4)
@@ -35,39 +38,36 @@ if __name__ == '__main__':
     ap.add_argument('--mc-update-interval', type=int, default=  10)
     args = ap.parse_args()
 
-    nnames = dict(white='wn', red='rn', dw='dw', dwt='dwt', dwta='dwta')
-    
-    rname = args.run_name
-    if args.noise == 'dw':
-        fname = join(DRESULT, 'gtc_nb_{:s}{:s}_n{:1d}'.format(nnames[args.noise],
-                                                        '_ldtk' if args.use_ldtk else '', args.night))
-    else:
-        fname = join(DRESULT, 'gtc_nb_{:s}{:s}'.format(nnames[args.noise],
-                                                        '_ldtk' if args.use_ldtk else ''))
+    fname = 'gtc_{:s}_n{:s}{:s}'.format(args.passband, args.nights, '_ldtk' if args.use_ldtk else '')
     de_file = fname+'_de.npz'
     mc_file = fname+'_mc.npz'
 
     de_exists = exists(de_file)
     mc_exists = exists(mc_file)
 
-    if args.noise == 'white':
-        lpf = LPFWN(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
-    elif args.noise == 'dw':
-        lpf = LPFDW(use_ldtk=args.use_ldtk, n_threads=args.n_threads, night=args.night)
-    elif args.noise == 'dwt':
-        lpf = LPFDWT(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
-    elif args.noise == 'red':
-        lpf = LPFRN(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
-    elif args.noise == 'dwta':
-        lpf = LPFDWTA(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
+    if args.nights in ['1','2']:
+        lpf = LPFSR(use_ldtk=args.use_ldtk, n_threads=args.n_threads, night=args.night)
+    else:
+        lpf = LPFMR(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
+                
+    # if args.noise == 'white':
+    #     lpf = LPFWN(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
+    # elif args.noise == 'dw':
+    #     lpf = 
+    # elif args.noise == 'dwt':
+    #     lpf = LPFDWT(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
+    # elif args.noise == 'red':
+    #     lpf = LPFRN(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
+    # elif args.noise == 'dwta':
+    #     lpf = LPFDWTA(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
 
     sampler = Sampler(fname, rname, lpf, args.n_walkers, mc_thin=args.mc_thin,
                       mc_nruns=args.mc_n_runs, notebook=False,
                       de_iupdate=args.de_update_interval, de_isave=args.de_save_interval,
                       mc_iupdate=args.mc_update_interval, mc_isave=args.mc_save_interval)
 
-    if args.noise == 'red':
-        sampler.de.C = 0.25
+    #if args.noise == 'red':
+    #    sampler.de.C = 0.25
     
     sampler.info('Saving results to %s', relpath(fname))
     sampler.info('Run name %s', rname)
