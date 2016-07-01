@@ -1,5 +1,8 @@
 from time import time
 from core import *
+from w80plots import *
+
+from matplotlib.backends.backend_pdf import PdfPages
 
 def print_nb(str):
     clear_output(wait=True)
@@ -116,3 +119,66 @@ class Sampler(object):
         ns = self.sampler.iterations // self.mc_thin
         np.savez(self.result_file+'_mc.npz', chains=self.sampler.chain[:,:ns,:], columns=self.lpf.ps.names)
     
+
+    def plot_status(self):
+
+        def plot_blp(pars, axs):
+            pal = sb.light_palette(c_ob)
+            for irun in range(2):
+                ps = percentile(fc[:,pars[irun]], [50,0.1,99.9,1,99,16,84], 0)
+                pmin = 0.99*fc[:,pars[irun]].min()
+                pmax = 1.01*fc[:,pars[irun]].max()
+                for ipb,p in enumerate(ps.T):
+                    dy = 1./lpf.npb
+                    ymin, ymax = ipb*dy+0.1*dy, (ipb+1)*dy-0.1*dy
+                    axs[irun].axvline(p[0], ymin=ymin, ymax=ymax, c='k', lw=1)
+                    axs[irun].axvspan(*p[1:3], ymin=ymin, ymax=ymax, fc=pal[0], lw=0)
+                    axs[irun].axvspan(*p[3:5], ymin=ymin, ymax=ymax, fc=pal[1], lw=0)
+                    axs[irun].axvspan(*p[5:7], ymin=ymin, ymax=ymax, fc=pal[3], lw=0)
+                    axs[irun].axvspan(*p[1:3], ymin=ymin, ymax=ymax, fill=False, ec='k', lw=1)
+            setp(axs, xlim=(pmin, pmax))
+
+        pp = PdfPages('Na_red_target_dw.pdf')
+
+        ## Radius ratio chains
+        ncols = 3
+        nrows = int(ceil(lpf.npb / float(ncols)))
+
+        fig,axs = pl.subplots(nrows, ncols, figsize=(11,11*(9./16.)), sharex=True, sharey=False)
+        x = arange(chain.shape[1])
+        for ipb,ax in zip(range(lpf.npb), axs.flat):
+            p = percentile(chain[:,:,4+ipb], [50,16,84], 0)
+            ax.fill_between(x, *p[1:3], alpha=0.1)
+            ax.plot(x, p[0])
+        fig.suptitle('{:s} -- Radius ratio chains'.format(lpf.passband), size=15)
+        pl.setp(axs, yticks=[], xlim=x[[0,-1]])
+        fig.tight_layout()
+        fig.subplots_adjust(top=0.94)
+        pp.savefig(fig)
+
+        ## Baseline distributions
+        fig,axs = pl.subplots(2, 4, figsize=(11,11*(9./16.)))
+        plot_blp([lpf.ibcn[:lpf.npb],lpf.ibcn[lpf.npb:]], axs=axs[0,:2])
+        plot_blp([lpf.ibal[:lpf.npb],lpf.ibal[lpf.npb:]], axs=axs[0,2:])
+        plot_blp([lpf.ibtl[:lpf.npb],lpf.ibtl[lpf.npb:]], axs=axs[1,:2])
+        plot_blp([lpf.iwn[:lpf.npb],lpf.iwn[lpf.npb:]],   axs=axs[1,2:])
+        pl.setp(axs[0,:2], xlim=(0.941,1.059))
+        pl.setp(axs[0,2:], xlim=(-0.05,0.05))
+        pl.setp(axs[1,:2], xlim=(-0.05,0.05))
+        pl.setp(axs[1,2:], xlim=( 0.0001,0.01))
+        pl.setp(axs, yticks=[]);
+        fig.tight_layout()
+        fig.subplots_adjust(wspace=0.01)
+        sb.despine(fig, left=True)
+        pp.savefig(fig)
+
+        ## Radius ratios
+        fig,ax = pl.subplots(figsize=(11,11*(9./16.)))
+
+        if lpf.passband == 'Na':
+            plot_radius_ratios(df, lpf, ax=ax, spc_scale=0.001, spc_loc=0.1718, axk=ax, 
+                               xlim=(566,612), ylim=(0.167,0.175), plot_k=False)
+        fig.tight_layout()
+        pp.savefig(fig)
+
+        pp.close()
