@@ -1,6 +1,7 @@
 from core import *
 
-from numpy import load, median, std, ones, ones_like, average, linspace, argmax, inf, poly1d, polyfit, zeros, nan, full_like, log10, arange
+from numpy import (load, median, std, ones, ones_like, average, linspace, argmax, inf, poly1d,
+                    polyfit, zeros, nan, full_like, log10, arange, float64, float32)
 
 class DataCube(object):
     def __init__(self, night, ccd, filters, width=60, istart=0, iend=1000, force=False):
@@ -34,10 +35,10 @@ class DataCube(object):
         ##       correction unless the apply_flat flag is set.
         ##
         if not exists(join('results',self._cname)) or force:
-            dc = []
-            for fo in l_obj[self.night-1][istart:iend]:
-                dc.append(pf.getdata(fo, ext=self.ccd).astype(np.float64)[:,self._sl] - self.bias[:,np.newaxis])
-            self._data  = array(dc)
+            iend = min(iend, len(l_obj[self.night-1]))
+            self._data = zeros([iend-istart, 2051, self._sl.stop-self._sl.start], np.float32)
+            for i,fo in enumerate(l_obj[self.night-1][istart:iend]):
+                self._data[i,:,:] = pf.getdata(fo, ext=self.ccd)[:,self._sl]-self.bias[:,np.newaxis]
             np.save(join('results',self._cname), self._data)
         else:
             self._data = np.load(join('results',self._cname))
@@ -50,9 +51,9 @@ class DataCube(object):
         self._spectrum_mask = ones(self._data.shape[1])
         
         if ccd == 1:
-            self._sky = concatenate([self._data[:,:,:5],self._data[:,:,-10:]], 2).mean(2)
+            self._sky = concatenate([self._data[:,:,:10],self._data[:,:,-10:]], 2).mean(2)
         if ccd == 2:
-            self._sky = concatenate([self._data[:,:,:10],self._data[:,:,-5:]], 2).mean(2)
+            self._sky = self._data[:,:,-12:-3].mean(2)
             
         ## Calculate sky
         ## -------------
@@ -81,12 +82,12 @@ class DataCube(object):
 
 
     def _create_dc(self, sl, istart=0, iend=1000):
-        dc = []
+        iend = min(iend, len(l_obj[self.night-1]))
+        dc = zeros([iend-istart, 2051, sl.stop-sl.start], np.float32)
         k = 'n%iccd%i'%(self.night, self.ccd)
-        for fo in l_obj[self.night-1][istart:iend]:
-            t = pf.getdata(fo, ext=self.ccd).astype(float64)[:,sl]-bias[k][:,np.newaxis]
-            dc.append(t)
-        return array(dc)
+        for i,fo in enumerate(l_obj[self.night-1][istart:iend]):
+            dc[i,:,:] = pf.getdata(fo, ext=self.ccd)[:,sl]-bias[k][:,np.newaxis]
+        return dc
 
         
     def set_flags(self, afl=None, ams=None, aap=None, ask=None, asm=None):
@@ -111,7 +112,7 @@ class DataCube(object):
         if self.apply_aperture:
             pixel_weights *= self.aperture
             
-        self._cspectra = np.sum(self._cdata*pixel_weights, 2)
+        self._cspectra = np.sum(self._cdata*pixel_weights, 2).astype(np.float64)
         #self._cspectra = average(self._cdata,2,weights=pixel_weights)
             
         
