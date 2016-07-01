@@ -23,7 +23,7 @@ from astropy.time import Time
 from scipy.signal import medfilt as mf
 from scipy.ndimage import median_filter as MF
 from scipy.ndimage import gaussian_filter1d as gf
-from scipy.ndimage import binary_erosion
+from scipy.ndimage import label, binary_erosion
 
 from numpy import pi, array, exp, abs, sum, zeros_like, arange, concatenate, argsort, s_
 from scipy.constants import k, G, proton_mass
@@ -94,6 +94,16 @@ TZERO = 2456000
 TC    = 125.417523 # Zero epoch
 P     =   3.067861 # Orbital period
 
+def gs(mplanet, rplanet):
+    """Surface gravity g [m/s^2]"""
+    return G*mplanet/rplanet**2
+
+def H(T, g=None, mu=None):
+    """Atmospheric scale height [m]"""
+    g  = g or gs(MPLANET, 0.17*RSTAR)
+    mu = mu or 2.3*proton_mass
+    return T*k/(g*mu)
+
 ## Directories and files
 ## ---------------------
 W80ROOT = os.path.dirname(os.path.abspath(join(__file__,'..')))
@@ -136,7 +146,7 @@ nccdkeys = 'n1ccd1 n1ccd2 n2ccd1 n2ccd2'.split()
 ## ------------------------
 AAOCW, AAPGW = 3.4645669, 7.0866142
 rc('figure', figsize=(14,5))
-rc(['axes', 'ytick', 'xtick'], labelsize=8)
+rc(['axes', 'ytick', 'xtick'], labelsize=7)
 rc('font', size=6)
 rc_paper = {"lines.linewidth": 1,
             'ytick.labelsize': 6.5,
@@ -191,17 +201,12 @@ except IOError:
         
 pb_filters_nb = [GeneralGaussian('nb{:02d}'.format(i+1), 530+20*i, 10, 15) for i in range(20)]
 pb_filters_nb[11] = GeneralGaussian('nb12', 746.95, 7.25, 15)
-pb_filters_k  = [GeneralGaussian('K{:02d}'.format(i+1),  768.2+1.95+4*(i-5), 2, 15) for i in range(11)]
-pb_filters_k.pop(2)
-pb_filters_k.pop(1)
+pb_filters_k  = ([GeneralGaussian('K{:02d}'.format(i+1),  740.2+6*i, 3, 15) for i in range(3)]
+                     + [GeneralGaussian('K{:02d}'.format(i+1),  768.2+6*i, 3, 15) for i in range(5)])
 for i,f in enumerate(pb_filters_k):
     f.name = 'K{:02d}'.format(i+1)
     
-pb_filters_na = [GeneralGaussian('Na{:02d}'.format(i+1), 589.4+4*(i-5), 2, 15) for i in range(11)]
-pb_filters_na.pop(3)
-for i,f in enumerate(pb_filters_na):
-    f.name = 'Na{:02d}'.format(i+1)
-
+pb_filters_na = [GeneralGaussian('Na{:02d}'.format(i+1), 589.4+6*(i-4), 3, 15) for i in range(9)]
 
 pb_centers_bb = [np.average(f.wl, weights=f(f.wl)) for f in pb_filters_bb]
 pb_centers_nb = [f.c for f in pb_filters_nb]
@@ -213,8 +218,7 @@ fs = [np.where(f>0.01, f, np.nan) for f in fs]
 tt = [500]+[pb_filters_bb[0].wl[np.nanargmin(abs(fs[i+1]-fs[i]))] for i in range(3)]+[900]
 pb_bounds_bb = [(tt[i], tt[i+1]) for i in range(4)]
 
-
-c_passbands = 'w g r i z J H K'.split() + ['nb%02i'%i for i in range(21)] + ['K%02i'%i for i in range(7)] +  ['Na%02i'%i for i in range(7)]
+c_passbands = 'w g r i z J H K'.split() + [f.name for f in pb_filters_nb] + [f.name for f in pb_filters_k] +  [f.name for f in pb_filters_na]
 
 def ccd_slice(run, width=50):
     df = pd.read_hdf('data/aux.h5',('jul16' if run==0 else 'aug25'))
@@ -223,36 +227,54 @@ def ccd_slice(run, width=50):
     return [s_[:,ymins[i]:ymaxs[i]] for i in range(2)]
 
 class CalibrationSpectrum(object):
-    def __init__(self, name, spectrum, lines, initial_guess=None):
+    def __init__(self, name, spectrum, lines, line_threshold, mask_ranges=[]):
         self.name = name
         self.spectrum = spectrum
         self.lines = lines
-        self.initial_guess = array(initial_guess)
         self.nlines = len(lines)
         self._model = zeros_like(self.spectrum)
         self.pixel  = arange(spectrum.size)
         self.wl     = zeros_like(self.pixel)
         self.solution = WavelengthSolution()
         self._fit_result = None
+
+        self.initial_guess = np.zeros(1+2*self.nlines)
+        lc, la = self.find_lines(line_threshold, self.nlines, mask_ranges)
+        self.initial_guess[1::2] = lc
+        self.initial_guess[2::2] = la
         
         self.pixel_to_wl = self.solution.pixel_to_wl
         self.wl_to_pixel = self.solution.wl_to_pixel
 
+        
+    def find_lines(self, threshold, max_nlines, mask_ranges=[]):
+        lmask = self.spectrum > threshold
+        for sl in mask_ranges:
+            lmask[sl] = 0
+        llabels, nlines = label(lmask)
+        lcenters = np.array([np.argmax(np.where(llabels==lid, self.spectrum, 0)) for lid in range(1,nlines+1)])
+        lamplitudes = np.array(self.spectrum[lcenters])
+        sid = np.sort(np.argsort(lamplitudes)[::-1][:max_nlines])
+        return lcenters[sid], lamplitudes[sid]
+        
         
     def model(self, pv):
         self._model.fill(0.)
         for i in xrange(self.nlines):
             self._model += psf_g1d(pv[1+i*2], pv[2+i*2], pv[0], self._model.size)
         return self._model
+
     
     def plot(self):
-        fig,ax = pl.subplots(1,self.nlines,figsize=(13,2), sharey=True)
+        nrows = int(np.ceil(self.nlines / 8.))
+        fig,ax = pl.subplots(nrows, 8, figsize=(13,2*nrows), sharey=True)
         cns = self.fitted_centers
         for i in range(self.nlines):
             sl = s_[cns[i]-10: cns[i]+10]
             ax.flat[i].plot(self.pixel[sl], self.spectrum[sl])
             ax.flat[i].plot(self.pixel[sl], self.model(self._fit_result)[sl])
             pl.setp(ax.flat[i], xlim=self.pixel[sl][[0,-1]])
+        pl.setp(ax, xticks=[])
         fig.tight_layout()
       
     
@@ -318,12 +340,3 @@ class WavelengthSolution(object):
     
     def wl_to_pixel(self, wavelengths):
         return self._cw2p(wavelengths)
-
-
-def H(T,g,mu=None):
-    """Atmospheric scale height [m]"""
-    mu = mu or 2.3*proton_mass
-    return T*k/(g*mu)
-
-
-
