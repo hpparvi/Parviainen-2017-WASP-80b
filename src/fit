@@ -6,20 +6,20 @@ from os.path import exists
 
 from core import *
 from sampler import Sampler
-#from lpf_narrowband_wn  import LPFC as LPFWN
-#from lpf_narrowband_dw  import LPFC as LPFDW
-#from lpf_dwt import LPFC as LPFDWTA
-#from lpf_narrowband_gp  import LPFC as LPFRN
 
 from lpf_singlerun import LPFC as LPFSR
 from lpf_multirun  import LPFC as LPFMR
+from lpf_multirun_direct import LPFC as LPFMD
 
 if __name__ == '__main__':
     ap = ArgumentParser()
     ap.add_argument('--use-ldtk', action='store_true', default=False)
-    ap.add_argument('--passband', type=str, choices=['bb', 'nb', 'K', 'Na'])
-    ap.add_argument('--nights', type=str, choices=['1', '2', '12'])
-    ap.add_argument('--noise', choices=['white', 'red', 'dw', 'dwt', 'dwta'], default='white')
+    ap.add_argument('--passband', type=str, choices=['w', 'bb', 'nb', 'K', 'Na'])
+    ap.add_argument('--nights', type=int, choices=[1, 2, 12])
+    ap.add_argument('--approach', type=str, choices=['dw','abs'], default='dw')
+    ap.add_argument('--lc-type', type=str, choices=['target','relative'], default='target')
+    ap.add_argument('--noise', type=str, choices=['white', 'red'])
+    ap.add_argument('--mask-ingress', action='store_true', default=False)
     ap.add_argument('--n-walkers',       type=int, default=600)
     ap.add_argument('--n-threads',       type=int, default=4)
     ap.add_argument('--night',           type=int, default=2)
@@ -38,25 +38,38 @@ if __name__ == '__main__':
     ap.add_argument('--mc-update-interval', type=int, default=  10)
     args = ap.parse_args()
 
-    fname = 'gtc_{:s}_n{:s}{:s}'.format(args.passband, args.nights, '_ldtk' if args.use_ldtk else '')
-    de_file = fname+'_de.npz'
-    mc_file = fname+'_mc.npz'
+    if args.approach == 'dw':
+        fname = 'gtc_{pb:s}_n{nights:s}_{lctype:s}_{noise:s}_{ldtk:s}{ingress:s}'.format(pb=args.passband, nights=str(args.nights),
+                                                    lctype=args.lc_type, noise=args.noise,
+                                                    ldtk='ldtk' if args.use_ldtk else 'noldtk',
+                                                    ingress='_noingress' if args.mask_ingress else '')
+    else:
+        fname = 'xxx_{pb:s}_n{nights:s}_{lctype:s}_{noise:s}_{ldtk:s}{ingress:s}'.format(pb=args.passband, nights=str(args.nights),
+                                                    lctype=args.lc_type, noise=args.noise,
+                                                    ldtk='ldtk' if args.use_ldtk else 'noldtk',
+                                                    ingress='_noingress' if args.mask_ingress else '')
+
+    de_file = join(DRESULT, fname+'_de.npz')
+    mc_file = join(DRESULT, fname+'_mc.npz')
 
     de_exists = exists(de_file)
     mc_exists = exists(mc_file)
 
-    if args.nights in ['1','2']:
-        lpf = LPFSR(use_ldtk=args.use_ldtk, n_threads=args.n_threads, night=args.night)
+    if args.approach == 'abs':
+        lpf = LPFMD(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise, n_threads=args.n_threads, mask_ingress=args.mask_ingress)
     else:
-        lpf = LPFMR(use_ldtk=args.use_ldtk, n_threads=args.n_threads)
+        if args.nights in [1,2]:
+            lpf = LPFSR(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise, n_threads=args.n_threads, night=args.nights, mask_ingress=args.mask_ingress)
+        else:
+            lpf = LPFMR(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise, n_threads=args.n_threads, mask_ingress=args.mask_ingress)
 
-    sampler = Sampler(fname, rname, lpf, args.n_walkers, mc_thin=args.mc_thin,
+    sampler = Sampler(join(DRESULT,fname), fname, lpf, args.n_walkers, mc_thin=args.mc_thin,
                       mc_nruns=args.mc_n_runs, notebook=False,
                       de_iupdate=args.de_update_interval, de_isave=args.de_save_interval,
                       mc_iupdate=args.mc_update_interval, mc_isave=args.mc_save_interval)
 
     sampler.info('Saving results to %s', relpath(fname))
-    sampler.info('Run name %s', rname)
+    sampler.info('Run name %s', fname)
     sampler.info('Population size %i', args.n_walkers)
     
     ## Differential evolution
@@ -67,11 +80,6 @@ if __name__ == '__main__':
     if de_exists:
         pop = np.load(de_file)['population']
         sampler.info('Continuing DE from a previous run')
-    elif args.noise == 'red' and exists(mc_file.replace('wn','rn')):
-        pop = np.load(mc_file.replace('wn','rn'))['chains']
-        pop = pop[:args.n_walkers, -1, :sampler.lpf.ps.ndim]
-        pop[:,sampler.lpf._sbl:] = uniform(0.997,1.003,size=(args.n_walkers,2*sampler.lpf.npb))
-        sampler.info('Continuing DE from a white noise run')
     else:
         pop = None
         sampler.info('Couldnt find DE results, forcing a DE run')
