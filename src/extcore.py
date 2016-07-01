@@ -185,7 +185,7 @@ class GPTime(object):
         self.pv_mapped = zeros(3)
         self.names = 'log10_amplitude inverse_time_scale log10_white_noise'.split()
 
-        self.priors = [UP(-3.5,  -2, 'log_ta'), ##  0  - log10 time amplitude
+        self.priors = [UP(-4.5,  -2, 'log_ta'), ##  0  - log10 time amplitude
                        UP( 5e-2, 5e5,    'its'), ##  1  - inverse time scale
                        UP(-4.0,  -2, 'log_wn')] ##  2  - log10 white noise
         self.ps = PriorSet(self.priors)
