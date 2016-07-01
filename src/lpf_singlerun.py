@@ -1,5 +1,6 @@
 import sys
 from copy import copy
+from itertools import chain
 from numpy import *
 
 from scipy.signal import medfilt as MF
@@ -7,27 +8,41 @@ from scipy.stats import scoreatpercentile as sap
 from numpy.random import normal
 
 from core import *
+from lpf import *
 from extcore import *
 
 class LPFC(LPF):
-    def __init__(self, use_ldtk=False, n_threads=4, night=2, test=False):
+    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=4, night=2, mask_ingress=False, noise='white'):
         self.night = night
         self.df = df = pd.merge(pd.read_hdf('../data/aux.h5','night%i'%night),
                                   pd.read_hdf('../results/gtc_light_curves.h5','night%i'%night),
                                   left_index=True, right_index=True)
+        
+        assert passband in ['bb','nb','K','Na']
+        assert lctype in ['target', 'relative']
+        assert noise in ['white', 'red']
+        assert night in [1,2]
+        
+        self.passband = passband        
+        if passband == 'bb':
+            cols = ['{:s}_{:s}'.format(lctype, pb) for pb in 'g r i z'.split()]
+            self.filters = pb_filters_bb
+        elif passband == 'nb':
+            cols = [c for c in self.df.columns if lctype+'_nb' in c]
+            self.filters = pb_filters_nb
+        elif passband == 'K':
+            cols = [c for c in df.columns if lctype+'_K'  in c]
+            self.filters = pb_filters_k
+        elif passband == 'Na':
+            cols = [c for c in df.columns if lctype+'_Na'  in c]
+            self.filters = pb_filters_na
 
-        cols = [c for c in df.columns if 'relative_nb' in c]
-        pbs = [c[-4:] for c in cols]
+        pbs = [c.split('_')[1] for c in cols]
         npb = len(pbs)
 
-        cref = [c for c in df.columns if 'comparison_nb' in c]
-        ctrg = [c for c in df.columns if 'target_nb' in c]
-        
         times  = npb*[df.bjd.values-TZERO]
-        fref = df[cref].values.T
-        ftrg = df[ctrg].values.T
-        #fluxes = map(N, list(ftrg / fref.mean(0)))
-        fluxes = map(lambda a: a/median(a[:25]), list(ftrg))
+        fluxes = list(df[cols].values.T)
+        fluxes = [f/median(f) for f in fluxes]
         
         ## Mask outliers
         ## -------------
@@ -36,8 +51,8 @@ class LPFC(LPF):
         for i in range(npb):
             f = fluxes[i]
             self.mask &= abs(f-MF(f,11)) < lim
-            #if self.night == 1:
-            #    self.mask &= (times[0] < 855.528) | (times[0] > 855.546)
+            if lctype == 'relative' and self.night == 1:
+                self.mask &= (times[0] < 855.528) | (times[0] > 855.546)
 
         times   = [times[i][self.mask]  for i in range(npb)]
         fluxes  = [fluxes[i][self.mask] for i in range(npb)]
@@ -48,16 +63,6 @@ class LPFC(LPF):
         self.elevat  = df.elevat[self.mask].values
         self.airmass = df.airmass[self.mask].values
         self.ctimes  = [t-t.mean() for t in times]
-        
-        ## Stuff for the rotator angle dependent baseline
-        self._wrk_ra =  zeros_like(self.rotang)
-
-        ## Stuff for the elevation dependent baseline
-        ## ------------------------------------------
-        self._wrk_el = zeros_like(self.elevat)
-        self.celevat = self.elevat-59.25
-        self.emaska  = times < t[argmax(self.elevat)]
-        self.emaskb  = ~self.emaska
         
         ## Initialise the parent
         ## ---------------------
@@ -133,14 +138,6 @@ class LPFC(LPF):
             self.lp = self.sc.create_profiles(2000)
             #self.lp.set_uncertainty_multiplier(2)
             
-        if test:
-            self.test_pv = pvt = np.load('test_pv.npz')['pv']
-            pvt[self.ik2] = 0.17**2
-            pvt[array(self.ik2)[[ 2, 8]]] = 0.172**2
-            pvt[array(self.ik2)[[-2,-8]]] = 0.169**2
-            fbl = self.compute_bl(pvt)
-            ftr = self.compute_transit(pvt)
-
             
     def set_pv_indices(self, sbl=None, swn=None):
         self.ik2 = [self._sk2+pbid for pbid in self.gpbids]
@@ -202,7 +199,7 @@ class LPFC(LPF):
 
     def fit_baseline(self, pvpop):
         def baseline(pv, ilc):
-            return pv[0] + pv[1]*self.ctimes[0] + pv[2]*self.airmass #+ pv[3]*self.airmass**2
+            return pv[0] + pv[1]*self.ctimes[0] + pv[2]*self.airmass 
 
         pvt = pvpop.copy()
         for i in range(self.nlc):
@@ -221,6 +218,6 @@ class LPFC(LPF):
         us = array([normal(um, emul*ue, size=pvt.shape[0]) for um,ue in zip(uv[:,0],uve[:,0])]).T
         vs = array([normal(vm, emul*ve, size=pvt.shape[0]) for vm,ve in zip(uv[:,1],uve[:,1])]).T
         q1s, q2s = map_uv_to_qq(us, vs)
-        pvt[:, self.iq1] = q1s
-        pvt[:, self.iq2] = q2s
+        pvt[:, self.uq1] = q1s
+        pvt[:, self.uq2] = q2s
         return pvt

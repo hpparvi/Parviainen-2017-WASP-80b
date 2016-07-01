@@ -5,7 +5,7 @@ from numpy import *
 
 from scipy.signal import medfilt as MF
 from scipy.stats import scoreatpercentile as sap
-from numpy.random import normal
+from numpy.random import normal, uniform
 
 from core import *
 from lpf import *
@@ -23,12 +23,12 @@ class LPFC(LPF):
                                   pd.read_hdf('../results/gtc_light_curves.h5','night2'),
                                   left_index=True, right_index=True)
 
-        assert passband in ['bb','nb','K','Na']
+        assert passband in ['w', 'bb','nb','K','Na']
         assert lctype in ['target', 'relative']
         assert noise in ['white', 'red']
         
         self.passband = passband        
-        if passband == 'bb':
+        if passband in ['w', 'bb']:
             cols = ['{:s}_{:s}'.format(lctype, pb) for pb in 'g r i z'.split()]
             self.filters = pb_filters_bb
         elif passband == 'nb':
@@ -37,17 +37,25 @@ class LPFC(LPF):
         elif passband == 'K':
             cols = [c for c in df1.columns if lctype+'_K'  in c]
             self.filters = pb_filters_k
-
         elif passband == 'Na':
             cols = [c for c in df1.columns if lctype+'_Na'  in c]
             self.filters = pb_filters_na
 
-        pbs = [c.split('_')[1] for c in cols]
+        if passband == 'w':
+            pbs = ['w']
+            fluxes = [df1[cols].values.mean(1), df2[cols].values.mean(1)]
+            NN = lambda a: a/a.max()
+            self.filters = [TabulatedFilter('white', pb_filters_bb[0].wl, NN(array([f.tm for f in pb_filters_bb]).mean(0)))]
+        else:
+            pbs = [c.split('_')[1] for c in cols]
+            fluxes = (list(df1[cols].values.T) + list(df2[cols].values.T))
+
         npb = len(pbs)
 
         times  = npb*[df1.bjd.values-TZERO]+npb*[df2.bjd.values-TZERO]
-        fluxes = (list(df1[cols].values.T) + list(df2[cols].values.T))
         fluxes = [f/median(f) for f in fluxes]
+
+        self.otimes = times
         
         ## Mask outliers
         ## -------------
@@ -110,18 +118,23 @@ class LPFC(LPF):
         for ipb in range(self.npb):
             self.priors.extend([UP(0, 1, 'q1_%i'%ipb),      ##  sq1 + 2*ipb -- limb darkening q1
                                 UP(0, 1, 'q2_%i'%ipb)])     ##  sq2 + 2*ipb -- limb darkening q2
-            
+
+        ## Rotator angle baseline
+        ## ----------------------
+        self._srp = len(self.priors)
+        for irun in range(2):
+            self.priors.append(UP( -pi,   pi, 'brp_%i'%irun)) ##  srp + irun -- Rotator angle phase
+            self.priors.append(UP(0.25, 4.00, 'brf_%i'%irun)) ##  srp + irun -- Rotator angle f
+
         ## Baseline
         ## --------
         self._sbl = len(self.priors)
         for ilc in range(self.nlc):
-            self.priors.append(UP( 0.0, 2.0, 'bcn_%i'%ilc)) ##  sbl + ilc -- Baseline constant
-            self.priors.append(UP(-1.0, 1.0, 'btl_%i'%ilc)) ##  sbl + ilc -- Linear time trend
-            self.priors.append(UP(-1.0, 1.0, 'bal_%i'%ilc)) ##  sbl + ilc -- Linear airmass trend
-            self.priors.append(UP(-1.0, 1.0, 'bra_%i'%ilc)) ##  sbl + ilc -- Rotaror angle amplitude
-            self.priors.append(UP(-2*pi,2*pi, 'brp_%i'%ilc)) ##  sbl + ilc -- Rotator angle phase
-            self.priors.append(UP(0.25, 4.0, 'brf_%i'%ilc)) ##  sbl + ilc -- Rotator angle f
-            
+            self.priors.append(UP( 0.0,  2.0, 'bcn_%i'%ilc)) ##  sbl + ilc -- Baseline constant
+            self.priors.append(UP(-1.0,  1.0, 'btl_%i'%ilc)) ##  sbl + ilc -- Linear time trend
+            self.priors.append(UP(-1.0,  1.0, 'bal_%i'%ilc)) ##  sbl + ilc -- Linear airmass trend
+            self.priors.append(UP( 0.0, 0.50, 'bra_%i'%ilc)) ##  sbl + ilc -- Rotaror angle amplitude
+
         ## White noise
         ## -----------
         self._swn = len(self.priors)
@@ -165,15 +178,17 @@ class LPFC(LPF):
         self.iq2 = [self._sq2+pbid*2 for pbid in self.gpbids]
         self.uq1 = np.unique(self.iq1)
         self.uq2 = np.unique(self.iq2)
+
+        if hasattr(self, '_srp'):
+            self.ibrp = [self._srp+2*irun   for irun in range(2)]
+            self.ibrf = [self._srp+2*irun+1 for irun in range(2)]
         
         sbl = sbl if sbl is not None else self._sbl
-        self.ibcn = [sbl+6*ilc   for ilc in range(self.nlc)]
-        self.ibtl = [sbl+6*ilc+1 for ilc in range(self.nlc)]
-        self.ibal = [sbl+6*ilc+2 for ilc in range(self.nlc)]
-        self.ibra = [sbl+6*ilc+3 for ilc in range(self.nlc)]
-        self.ibrp = [sbl+6*ilc+4 for ilc in range(self.nlc)]
-        self.ibrf = [sbl+6*ilc+5 for ilc in range(self.nlc)]
-        
+        self.ibcn = [sbl+4*ilc   for ilc in range(self.nlc)]
+        self.ibtl = [sbl+4*ilc+1 for ilc in range(self.nlc)]
+        self.ibal = [sbl+4*ilc+2 for ilc in range(self.nlc)]
+        self.ibra = [sbl+4*ilc+3 for ilc in range(self.nlc)]
+
         swn = swn if swn is not None else self._swn
         self.iwn = [swn+ilc for ilc in range(self.nlc)]
 
@@ -224,16 +239,22 @@ class LPFC(LPF):
         self._wrk_lc[1][:] = bl2*tr2
         return self._wrk_lc
 
-
+            
     def compute_baseline(self, pv):
+        ra_term_1 = np.cos(pv[self.ibrp[:1]][:,newaxis] + pv[self.ibrf[:1]][:,newaxis]*self.rotang[0])
+        ra_term_2 = np.cos(pv[self.ibrp[1:]][:,newaxis] + pv[self.ibrf[1:]][:,newaxis]*self.rotang[self.npb])
+        ra_term_1 = pv[self.ibra[:self.npb]][:,newaxis] * (ra_term_1 - ra_term_1.mean()) / ra_term_1.ptp()
+        ra_term_2 = pv[self.ibra[self.npb:]][:,newaxis] * (ra_term_2 - ra_term_2.mean()) / ra_term_2.ptp()
+        #ra_term_1 = pv[self.ibra[:self.npb]][:,newaxis] * np.cos(pv[self.ibrp[:1]][:,newaxis] + pv[self.ibrf[:1]][:,newaxis]*self.rotang[0]))
+
         bl1 = ( pv[self.ibcn[:self.npb]][:,newaxis]
               + pv[self.ibtl[:self.npb]][:,newaxis] * self.ctimes[0]
               + pv[self.ibal[:self.npb]][:,newaxis] * self.airmass[0]
-              + pv[self.ibra[:self.npb]][:,newaxis] * np.cos(pv[self.ibrp[:self.npb]][:,newaxis] + pv[self.ibrf[:self.npb]][:,newaxis]*self.rotang[0]))
+              + ra_term_1 )
         bl2 = ( pv[self.ibcn[self.npb:]][:,newaxis]
               + pv[self.ibtl[self.npb:]][:,newaxis] * self.ctimes[self.npb]
               + pv[self.ibal[self.npb:]][:,newaxis] * self.airmass[self.npb]
-              + pv[self.ibra[self.npb:]][:,newaxis] * np.cos(pv[self.ibrp[self.npb:]][:,newaxis] + pv[self.ibrf[self.npb:]][:,newaxis]*self.rotang[self.npb]))
+              + ra_term_2 )
         return bl1, bl2
 
 
@@ -253,24 +274,60 @@ class LPFC(LPF):
     
     def fit_baseline(self, pvpop):
         def baseline(pv, ilc):
-            return pv[0] + pv[1]*self.ctimes[ilc] + pv[2]*self.airmass[ilc] + pv[3]*np.cos(pv[4]+pv[5]*self.rotang[ilc])
+            ra_term = np.cos(pv[4]+pv[5]*self.rotang[ilc])
+            ra_term = pv[3]*(ra_term-ra_term.mean()) / ra_term.ptp()
+            return pv[0] + pv[1]*self.ctimes[ilc] + pv[2]*self.airmass[ilc] + ra_term
 
         def minfun(pv):
-            if not (1.0 < pv[5] < 3.9):
+            if not ((-pi < pv[4] < pi) and (0.3 < pv[5] < 3.8)) and (pv[3] > 0):
                 return inf
             return ((self.fluxes[i][m]-baseline(pv,i)[m])**2).sum()
          
+        # pvt = pvpop.copy()
+        # rp, rf = zeros(self.nlc), zeros(self.nlc)
+        # for i in range(self.nlc):
+        #     m = ~self.otmasks[i]
+        #     pv0 = fmin(minfun, [1, 0, 0, 0.01, 0, 1], disp=False, ftol=1e-9, xtol=1e-9)
+        #     pvt[:,self.ibcn[i]] = normal(pv0[0], 0.001,            size=pvt.shape[0])
+        #     pvt[:,self.ibtl[i]] = normal(pv0[1], 0.01*abs(pv0[1]), size=pvt.shape[0])
+        #     pvt[:,self.ibal[i]] = normal(pv0[2], 0.01*abs(pv0[2]), size=pvt.shape[0])
+        #     pvt[:,self.ibra[i]] = uniform(0, 0.02, size=pvt.shape[0])
+        #     #np.abs(normal(pv0[3], 0.01*abs(pv0[3]), size=pvt.shape[0]))
+        #     #rp[i] = pv0[4]
+        #     #ref[i] = pv0[5]
+        # pvt[:, self.ibrp[0]] = normal(0, 0.1, size=pvt.shape[0])
+        # pvt[:, self.ibrp[1]] = normal(0, 0.1, size=pvt.shape[0])
+        # pvt[:, self.ibrf[0]] = normal(1, 0.1, size=pvt.shape[0])
+        # pvt[:, self.ibrf[1]] = normal(1, 0.1, size=pvt.shape[0])
+        # #pvt[:,self.ibrp[0]] = np.abs(normal(rp.mean(), rp.std(), size=pvt.shape[0]))
+        # #pvt[:,self.ibrp[1]] = np.abs(normal(rp.mean(), rp.std(), size=pvt.shape[0]))
+        # #pvt[:,self.ibrf[0]] = np.clip(normal(rf.mean(), rf.std(), size=pvt.shape[0]), 0.26, 3.8)
+        # #pvt[:,self.ibrf[1]] = np.clip(normal(rf.mean(), rf.std(), size=pvt.shape[0]), 0.26, 3.8)
+        # return pvt
+
         pvt = pvpop.copy()
+        pvb = zeros([self.nlc, 6])
         for i in range(self.nlc):
             m = ~self.otmasks[i]
-            pv0 = fmin(minfun, 
-                       [1,0,0,0,0,2], disp=False, ftol=1e-9, xtol=1e-9)
-            pvt[:,self.ibcn[i]] = normal(pv0[0], 0.001,            size=pvt.shape[0])
-            pvt[:,self.ibtl[i]] = normal(pv0[1], 0.01*abs(pv0[1]), size=pvt.shape[0])
-            pvt[:,self.ibal[i]] = normal(pv0[2], 0.01*abs(pv0[2]), size=pvt.shape[0])
-            pvt[:,self.ibra[i]] = normal(pv0[3], 0.01*abs(pv0[3]), size=pvt.shape[0])
-            pvt[:,self.ibrp[i]] = normal(pv0[4], 0.01*abs(pv0[4]), size=pvt.shape[0])
-            pvt[:,self.ibrf[i]] = normal(pv0[5], 0.01*abs(pv0[5]), size=pvt.shape[0])
+            pvb[i,:] = fmin(minfun, [1, 0, 0, 0.01, 0, 1], disp=False, ftol=1e-9, xtol=1e-9)
+
+        s1, s2 = s_[:self.npb], s_[self.npb:]
+        pvm1, pvs1 = pvb[s1,:].mean(0), pvb[s1,:].std(0)
+        pvm2, pvs2 = pvb[s2,:].mean(0), pvb[s2,:].std(0)
+
+        if self.passband == 'w':
+            pvs1 = 0.001*np.abs(pvb[s1,:].mean(0))
+            pvs2 = 0.001*np.abs(pvb[s2,:].mean(0))
+
+        for s,pvm,pvs in zip([s1,s2],[pvm1,pvm2],[pvs1,pvs2]):
+            pvt[:, self.ibcn[s]] = normal(pvm[0], 0.001,  size=[pvt.shape[0], self.npb])
+            pvt[:, self.ibtl[s]] = normal(pvm[1], pvs[1], size=[pvt.shape[0], self.npb])
+            pvt[:, self.ibal[s]] = normal(pvm[2], pvs[2], size=[pvt.shape[0], self.npb])
+            pvt[:, self.ibra[s]] = np.clip(normal(pvm[3], pvs[3], size=[pvt.shape[0], self.npb]), 0, 1)
+        pvt[:, self.ibrp[0]] = normal(pvm1[4], pvs1[4], size=pvt.shape[0])
+        pvt[:, self.ibrp[1]] = normal(pvm2[4], pvs2[4], size=pvt.shape[0])
+        pvt[:, self.ibrf[0]] = normal(pvm1[5], pvs1[5], size=pvt.shape[0])
+        pvt[:, self.ibrf[1]] = normal(pvm2[5], pvs2[5], size=pvt.shape[0])
         return pvt
 
 

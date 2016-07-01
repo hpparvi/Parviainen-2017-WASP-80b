@@ -1,5 +1,6 @@
 import sys
 from copy import copy
+from itertools import chain
 from numpy import *
 
 from scipy.signal import medfilt as MF
@@ -7,10 +8,11 @@ from scipy.stats import scoreatpercentile as sap
 from numpy.random import normal
 
 from core import *
+from lpf import *
 from extcore import *
 
 class LPFC(LPF):
-    def __init__(self, passband, use_ldtk=False, n_threads=4, test=False):
+    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=4, mask_ingress=False, noise='white'):
         
         self.df1 = df1 = pd.merge(pd.read_hdf('../data/aux.h5','night1'),
                                   pd.read_hdf('../results/gtc_light_curves.h5','night1'),
@@ -20,18 +22,21 @@ class LPFC(LPF):
                                   left_index=True, right_index=True)
 
         assert passband in ['bb','nb','K','Na']
+        assert lctype in ['target', 'relative']
+        assert noise in ['white', 'red']
+        
         self.passband = passband        
         if passband == 'bb':
-            cols = 'target_g target_r target_i target_z'.split()
+            cols = ['{:s}_{:s}'.format(lctype, pb) for pb in 'g r i z'.split()]
             self.filters = pb_filters_bb
         elif passband == 'nb':
-            cols = [c for c in self.df1.columns if 'target_nb' in c]
+            cols = [c for c in self.df1.columns if lctype+'_nb' in c]
             self.filters = pb_filters_nb
         elif passband == 'K':
-            cols = [c for c in df1.columns if 'target_K'  in c]
+            cols = [c for c in df1.columns if lctype+'_K'  in c]
             self.filters = pb_filters_k
         elif passband == 'Na':
-            cols = [c for c in df1.columns if 'target_Na'  in c]
+            cols = [c for c in df1.columns if lctype+'_Na'  in c]
             self.filters = pb_filters_na
 
         pbs = [c.split('_')[1] for c in cols]
@@ -50,8 +55,12 @@ class LPFC(LPF):
             for i in range(npb):
                 f = fluxes[i+npb*j]
                 mask &= abs(f-MF(f,11)) < lim
+            if (lctype == 'relative') and (j == 0):
+                mask &= (times[0] < 855.528) | (times[0] > 855.546)
+            if mask_ingress:
+                mask[:180] = False
             self.masks.append(mask)
-
+            
         times   = [times[i][masks[i//npb]]  for i in range(2*npb)]
         fluxes  = [fluxes[i][masks[i//npb]] for i in range(2*npb)]
 
@@ -62,20 +71,10 @@ class LPFC(LPF):
         self.airmass = npb*[df1.airmass[masks[0]].values] + npb*[df2.airmass[masks[1]].values]
         self.ctimes  = [t-t.mean() for t in times]
         
-        ## Stuff for the rotator angle dependent baseline
-        self._wrk_ra =  [zeros_like(r) for r in self.rotang]
-
-        ## Stuff for the elevation dependent baseline
-        ## ------------------------------------------
-        self._wrk_el = [zeros_like(e) for e in self.elevat]
-        self.celevat = [e-59.25 for e in self.elevat]
-        self.emaska  = [t < t[argmax(e)] for e,t in zip(self.elevat,times)]
-        self.emaskb  = [~m for m in self.emaska]
-        
         ## Initialise the parent
         ## ---------------------
         super(LPFC,self).__init__(times, fluxes, 2*pbs,
-                                  use_ldtk=False, constant_k=False, noise='white',
+                                  use_ldtk=False, constant_k=False, noise=noise,
                                   ldf_path='../data/external_lcs.h5', nthreads=n_threads)
         self.use_ldtk = use_ldtk
 
@@ -133,9 +132,14 @@ class LPFC(LPF):
         self.priors[1] = NP(fc.p.mean(),    10*fc.p.std(),    'p',  limsigma=5)
         self.priors[2] = NP(fc.rho.mean(),  fc.rho.std(),   'rho',  limsigma=5)
         self.priors[3] = NP(fc.b.mean(),    fc.b.std(),       'b',  lims=(0,1))
+
+        if self.noise == 'red':
+            for ilc,i in enumerate(self.iwn):
+                self.priors[i] = NP(7e-4, 2e-4, 'e_%i'%ilc, lims=(0,1))
         
         self.ps = PriorSet(self.priors)
-        self.setup_gp()
+        if self.noise == 'red':
+            self.setup_gp()
 
         self.prior_kw = NP(0.1707, 3.2e-4, 'kw', lims=(0.16,0.18))
         
@@ -144,17 +148,9 @@ class LPFC(LPF):
         if use_ldtk:
             self.sc = LDPSetCreator([4150,100], [4.6,0.2], [-0.14,0.16], self.filters)
             self.lp = self.sc.create_profiles(2000)
-            self.lp.resample_linear_z()
+            #self.lp.resample_linear_z()
             #self.lp.set_uncertainty_multiplier(2)
             
-        if test:
-            self.test_pv = pvt = np.load('test_pv.npz')['pv']
-            pvt[self.ik2] = 0.17**2
-            pvt[array(self.ik2)[[ 2, 8]]] = 0.172**2
-            pvt[array(self.ik2)[[-2,-8]]] = 0.169**2
-            fbl = self.compute_bl(pvt)
-            ftr = self.compute_transit(pvt)
-
             
     def set_pv_indices(self, sbl=None, swn=None):
         self.ik2 = [self._sk2+pbid for pbid in self.gpbids]
@@ -174,9 +170,20 @@ class LPFC(LPF):
 
 
     def setup_gp(self):
-        pass
+        if self.passband in 'bb nb Na K'.split():
+            hps = pd.read_hdf(join(DRESULT,'gtc_gp_hyperparameters.h5'), self.passband)
+        else:
+            raise NotImplementedError()
 
+        self.gps = []
+        for ilc in range(self.nlc):
+            self.gps.append(GPTime(self.times[ilc], self.fluxes[ilc]))
+            if ilc < self.npb:
+                self.gps[-1].compute(hps.night1.values[ilc])
+            else:
+                self.gps[-1].compute(hps.night2.values[ilc-self.npb])
 
+                
     def lnposterior(self, pv):
         _k = sqrt(pv[self.ik2]).mean()
         return super(LPFC,self).lnposterior(pv) + self.prior_kw.log(_k)                
@@ -216,11 +223,19 @@ class LPFC(LPF):
 
 
     def lnlikelihood_wn(self, pv):
-        fluxes_m = self.compute_lc_model(pv)
-        return (sum([ll_normal_es(fo, fm, wn) for fo,fm,wn in zip(self.fluxes[:self.npb], fluxes_m[0], pv[self.iwn[:self.npb]])]) +
-                sum([ll_normal_es(fo, fm, wn) for fo,fm,wn in zip(self.fluxes[self.npb:], fluxes_m[1], pv[self.iwn[self.npb:]])]) )
+        lnlike = 0.
+        for iwn, fo, fm in zip(self.iwn, self.fluxes, chain(*self.compute_lc_model(pv))):
+            lnlike += ll_normal_es(fo, fm, pv[iwn])
+        return lnlike
 
+    
+    def lnlikelihood_rn(self, pv):
+        lnlike = 0.
+        for ilc, (fo, fm) in enumerate(zip(self.fluxes, chain(*self.compute_lc_model(pv)))):
+            lnlike += self.gps[ilc].gp.lnlikelihood(fo-fm)
+        return lnlike
 
+    
     def fit_baseline(self, pvpop):
         def baseline(pv, ilc):
             return pv[0] + pv[1]*self.ctimes[ilc] + pv[2]*self.airmass[ilc] 
