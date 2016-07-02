@@ -108,7 +108,7 @@ def H(T, g=None, mu=None):
 ## ---------------------
 W80ROOT = os.path.dirname(os.path.abspath(join(__file__,'..')))
 W80DATA = join(os.getenv('W80DATA'))
-DATADIRS = [join(W80DATA,'OB0019'), join(W80DATA,'OB0020')]
+DATADIRS = [join(W80DATA,'OSIRIS_16_07_2014'), join(W80DATA,'OSIRIS_25_08_2014')]
 
 DFLAT = [join(rawdir,'flat')   for rawdir in DATADIRS]
 DBIAS = [join(rawdir,'bias')   for rawdir in DATADIRS]
