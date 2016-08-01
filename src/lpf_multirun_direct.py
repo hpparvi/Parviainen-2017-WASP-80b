@@ -82,6 +82,9 @@ class LPFC(LPF):
         self.airmass = npb*[df1.airmass[masks[0]].values] + npb*[df2.airmass[masks[1]].values]
         self.ctimes  = [t-t.mean() for t in times]
         
+        self.airmass_means = [a.mean() for a in self.airmass]
+        self.airmass = [a-a.mean() for a in self.airmass]
+
         ## Initialise the parent
         ## ---------------------
         super(LPFC,self).__init__(times, fluxes, 2*pbs,
@@ -123,8 +126,7 @@ class LPFC(LPF):
         ## ----------------------
         self._srp = len(self.priors)
         for irun in range(2):
-            self.priors.append(UP( -pi,   pi, 'brp_%i'%irun)) ##  srp + irun -- Rotator angle phase
-            self.priors.append(UP(0.25, 4.00, 'brf_%i'%irun)) ##  srp + irun -- Rotator angle f
+            self.priors.append(UP(0, 2*pi, 'brp_%i'%irun)) ##  srp + irun -- Rotator angle phase
 
         ## Baseline
         ## --------
@@ -180,8 +182,7 @@ class LPFC(LPF):
         self.uq2 = np.unique(self.iq2)
 
         if hasattr(self, '_srp'):
-            self.ibrp = [self._srp+2*irun   for irun in range(2)]
-            self.ibrf = [self._srp+2*irun+1 for irun in range(2)]
+            self.ibrp = [self._srp+irun   for irun in range(2)]
         
         sbl = sbl if sbl is not None else self._sbl
         self.ibcn = [sbl+4*ilc   for ilc in range(self.nlc)]
@@ -241,8 +242,8 @@ class LPFC(LPF):
 
             
     def compute_baseline(self, pv):
-        ra_term_1 = np.cos(pv[self.ibrp[:1]][:,newaxis] + pv[self.ibrf[:1]][:,newaxis]*self.rotang[0])
-        ra_term_2 = np.cos(pv[self.ibrp[1:]][:,newaxis] + pv[self.ibrf[1:]][:,newaxis]*self.rotang[self.npb])
+        ra_term_1 = np.cos(pv[self.ibrp[:1]][:,newaxis] + self.rotang[0])
+        ra_term_2 = np.cos(pv[self.ibrp[1:]][:,newaxis] + self.rotang[self.npb])
         ra_term_1 = pv[self.ibra[:self.npb]][:,newaxis] * (ra_term_1 - ra_term_1.mean()) / ra_term_1.ptp()
         ra_term_2 = pv[self.ibra[self.npb:]][:,newaxis] * (ra_term_2 - ra_term_2.mean()) / ra_term_2.ptp()
         #ra_term_1 = pv[self.ibra[:self.npb]][:,newaxis] * np.cos(pv[self.ibrp[:1]][:,newaxis] + pv[self.ibrf[:1]][:,newaxis]*self.rotang[0]))
@@ -274,12 +275,12 @@ class LPFC(LPF):
     
     def fit_baseline(self, pvpop):
         def baseline(pv, ilc):
-            ra_term = np.cos(pv[4]+pv[5]*self.rotang[ilc])
+            ra_term = np.cos(pv[4]+self.rotang[ilc])
             ra_term = pv[3]*(ra_term-ra_term.mean()) / ra_term.ptp()
             return pv[0] + pv[1]*self.ctimes[ilc] + pv[2]*self.airmass[ilc] + ra_term
 
         def minfun(pv):
-            if not ((-pi < pv[4] < pi) and (0.3 < pv[5] < 3.8)) and (pv[3] > 0):
+            if not (0. <= pv[4] <= pi) and (pv[3] > 0.):
                 return inf
             return ((self.fluxes[i][m]-baseline(pv,i)[m])**2).sum()
          
@@ -306,10 +307,10 @@ class LPFC(LPF):
         # return pvt
 
         pvt = pvpop.copy()
-        pvb = zeros([self.nlc, 6])
+        pvb = zeros([self.nlc, 5])
         for i in range(self.nlc):
             m = ~self.otmasks[i]
-            pvb[i,:] = fmin(minfun, [1, 0, 0, 0.01, 0, 1], disp=False, ftol=1e-9, xtol=1e-9)
+            pvb[i,:] = fmin(minfun, [1, 0, 0, 0.01, 0.1], disp=False, ftol=1e-9, xtol=1e-9)
 
         s1, s2 = s_[:self.npb], s_[self.npb:]
         pvm1, pvs1 = pvb[s1,:].mean(0), pvb[s1,:].std(0)
@@ -324,10 +325,10 @@ class LPFC(LPF):
             pvt[:, self.ibtl[s]] = normal(pvm[1], pvs[1], size=[pvt.shape[0], self.npb])
             pvt[:, self.ibal[s]] = normal(pvm[2], pvs[2], size=[pvt.shape[0], self.npb])
             pvt[:, self.ibra[s]] = np.clip(normal(pvm[3], pvs[3], size=[pvt.shape[0], self.npb]), 0, 1)
-        pvt[:, self.ibrp[0]] = normal(pvm1[4], pvs1[4], size=pvt.shape[0])
-        pvt[:, self.ibrp[1]] = normal(pvm2[4], pvs2[4], size=pvt.shape[0])
-        pvt[:, self.ibrf[0]] = normal(pvm1[5], pvs1[5], size=pvt.shape[0])
-        pvt[:, self.ibrf[1]] = normal(pvm2[5], pvs2[5], size=pvt.shape[0])
+        #pvt[:, self.ibrp[0]] = normal(pvm1[4], pvs1[4], size=pvt.shape[0])
+        #pvt[:, self.ibrp[1]] = normal(pvm2[4], pvs2[4], size=pvt.shape[0])
+        #pvt[:, self.ibrf[0]] = normal(pvm1[5], pvs1[5], size=pvt.shape[0])
+        #pvt[:, self.ibrf[1]] = normal(pvm2[5], pvs2[5], size=pvt.shape[0])
         return pvt
 
 
