@@ -11,6 +11,8 @@ from lpf_singlerun import LPFC as LPFSR
 from lpf_multirun  import LPFC as LPFMR
 from lpf_multirun_direct import LPFC as LPFMD
 
+from emcee.utils import MPIPool
+
 if __name__ == '__main__':
     ap = ArgumentParser()
     ap.add_argument('--use-ldtk', action='store_true', default=False)
@@ -38,19 +40,16 @@ if __name__ == '__main__':
     ap.add_argument('--mc-update-interval', type=int, default=  10)
     args = ap.parse_args()
 
-    if args.approach == 'dw':
-        fname = 'gtc_{pb:s}_n{nights:s}_{lctype:s}_{noise:s}_{ldtk:s}{ingress:s}'.format(pb=args.passband, nights=str(args.nights),
-                                                    lctype=args.lc_type, noise=args.noise,
-                                                    ldtk='ldtk' if args.use_ldtk else 'noldtk',
-                                                    ingress='_noingress' if args.mask_ingress else '')
-    else:
-        fname = 'xxx_{pb:s}_n{nights:s}_{lctype:s}_{noise:s}_{ldtk:s}{ingress:s}'.format(pb=args.passband, nights=str(args.nights),
-                                                    lctype=args.lc_type, noise=args.noise,
-                                                    ldtk='ldtk' if args.use_ldtk else 'noldtk',
-                                                    ingress='_noingress' if args.mask_ingress else '')
+    fname_template = 'gtc_{approach:s}_{pb:s}_n{nights:s}_{lctype:s}_{noise:s}_{ldtk:s}{ingress:s}'
 
-    de_file = join(DRESULT, fname+'_de.npz')
-    mc_file = join(DRESULT, fname+'_mc.npz')
+    fname = fname_template.format(approach=args.approach,
+                                  pb=args.passband, nights=str(args.nights),
+                                  lctype=args.lc_type, noise=args.noise,
+                                  ldtk='ldtk' if args.use_ldtk else 'noldtk',
+                                  ingress='_noingress' if args.mask_ingress else '')
+
+    de_file = join(DRESULT, fname+'_de.fits')
+    mc_file = join(DRESULT, fname+'_mc.fits')
 
     de_exists = exists(de_file)
     mc_exists = exists(mc_file)
@@ -63,8 +62,16 @@ if __name__ == '__main__':
         else:
             lpf = LPFMR(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise, n_threads=args.n_threads, mask_ingress=args.mask_ingress)
 
-    sampler = Sampler(join(DRESULT,fname), fname, lpf, args.n_walkers, mc_thin=args.mc_thin,
-                      mc_nruns=args.mc_n_runs, notebook=False,
+    def lnposterior(pv):
+        return lpf.lnposterior(pv)
+
+    pool = MPIPool()
+    if not pool.is_master():
+        pool.wait()
+        sys.exit(0)
+
+    sampler = Sampler(join(DRESULT,fname), fname, lpf, lnposterior, args.n_walkers, mc_thin=args.mc_thin,
+                      mc_nruns=args.mc_n_runs, pool=pool, notebook=False,
                       de_iupdate=args.de_update_interval, de_isave=args.de_save_interval,
                       mc_iupdate=args.mc_update_interval, mc_isave=args.mc_save_interval)
 
@@ -78,7 +85,7 @@ if __name__ == '__main__':
     ## model, or c) white-noise run if running a red-noise model.
     ##
     if de_exists:
-        pop = np.load(de_file)['population']
+        pop = Table.read(de_file).to_pandas().values
         sampler.info('Continuing DE from a previous run')
     else:
         pop = None
@@ -92,9 +99,10 @@ if __name__ == '__main__':
     if args.do_mc:
         sampler.info('Running MC with %i runs and %i iterations', args.mc_n_runs, args.mc_n_iterations)
         if args.continue_mc and mc_exists:
-            p0 = np.load(mc_file)['chains'][:,-1,:]
+            p0 = Table.read(mc_file).to_pandas().values.reshape([args.n_walkers, -1, lpf.ps.ndim])[:,-1,:]
         else:
             p0 = None
             
         sampler.sample(args.mc_n_iterations, population=p0)
  
+    pool.close()

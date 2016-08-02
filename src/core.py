@@ -20,6 +20,7 @@ from matplotlib import rc
 from IPython.display import clear_output, HTML, display
 
 from astropy.time import Time
+from astropy.table import Table
 from scipy.signal import medfilt as mf
 from scipy.ndimage import median_filter as MF
 from scipy.ndimage import gaussian_filter1d as gf

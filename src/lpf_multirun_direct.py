@@ -103,8 +103,8 @@ class LPFC(LPF):
         ## ------------
         ## Basic parameters
         ## ----------------
-        self.priors = [NP(    TC,   5e-3,   'tc'), ##  0  - Transit centre
-                       NP(     P,   3e-4,    'p'), ##  1  - Period
+        self.priors = [NP(    TC,   1e-2,   'tc'), ##  0  - Transit centre
+                       NP(     P,   5e-4,    'p'), ##  1  - Period
                        UP(  3.50,   4.50,  'rho'), ##  2  - Stellar density
                        UP(  0.00,   0.99,    'b')] ##  3  - Impact parameter
         
@@ -126,7 +126,7 @@ class LPFC(LPF):
         ## ----------------------
         self._srp = len(self.priors)
         for irun in range(2):
-            self.priors.append(UP(0, 2*pi, 'brp_%i'%irun)) ##  srp + irun -- Rotator angle phase
+            self.priors.append(UP(-0.5*pi, pi, 'brp_%i'%irun)) ##  srp + irun -- Rotator angle phase
 
         ## Baseline
         ## --------
@@ -149,8 +149,8 @@ class LPFC(LPF):
         ## Update the priors using the external data modelling
         ## ---------------------------------------------------
         fc = pd.read_hdf(RFILE_EXT, 'vkrn_ldtk/fc')
-        self.priors[0] = NP(fc.tc.mean(),   10*fc.tc.std(),  'tc',  limsigma=5)
-        self.priors[1] = NP(fc.p.mean(),    10*fc.p.std(),    'p',  limsigma=5)
+        self.priors[0] = NP(fc.tc.mean(),   20*fc.tc.std(),  'tc',  limsigma=15)
+        self.priors[1] = NP(fc.p.mean(),    20*fc.p.std(),    'p',  limsigma=15)
         self.priors[2] = NP(fc.rho.mean(),  fc.rho.std(),   'rho',  limsigma=5)
         self.priors[3] = NP(fc.b.mean(),    fc.b.std(),       'b',  lims=(0,1))
 
@@ -324,7 +324,7 @@ class LPFC(LPF):
             pvt[:, self.ibcn[s]] = normal(pvm[0], 0.001,  size=[pvt.shape[0], self.npb])
             pvt[:, self.ibtl[s]] = normal(pvm[1], pvs[1], size=[pvt.shape[0], self.npb])
             pvt[:, self.ibal[s]] = normal(pvm[2], pvs[2], size=[pvt.shape[0], self.npb])
-            pvt[:, self.ibra[s]] = np.clip(normal(pvm[3], pvs[3], size=[pvt.shape[0], self.npb]), 0, 1)
+            pvt[:, self.ibra[s]] = np.clip(normal(pvm[3], pvs[3], size=[pvt.shape[0], self.npb]), 0, 0.5)
         #pvt[:, self.ibrp[0]] = normal(pvm1[4], pvs1[4], size=pvt.shape[0])
         #pvt[:, self.ibrp[1]] = normal(pvm2[4], pvs2[4], size=pvt.shape[0])
         #pvt[:, self.ibrf[0]] = normal(pvm1[5], pvs1[5], size=pvt.shape[0])
