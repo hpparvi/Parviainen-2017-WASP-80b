@@ -87,6 +87,37 @@ if __name__ == '__main__':
     if de_exists:
         pop = Table.read(de_file).to_pandas().values
         sampler.info('Continuing DE from a previous run')
+    elif args.approach == 'abs' and args.passband != 'w':
+        white_file = fname_template.format(approach=args.approach, pb='w', nights=str(args.nights),
+                                           lctype=args.lc_type, noise=args.noise,
+                                           ldtk='ldtk' if args.use_ldtk else 'noldtk',
+                                           ingress='_noingress' if args.mask_ingress else '')
+        white_file = join(DRESULT,white_file+'_mc.fits')
+
+        if not exists(white_file):
+            sampler.error('White LC error doesn\'t exist')
+            exit()
+
+        fc = Table.read(white_file).to_pandas().values
+        pop = lpf.ps.generate_pv_population(args.n_walkers)
+
+        hw = lpf.nlc // 2
+        npop = pop.shape[0]
+        ndim = pop.shape[1]
+        pop[:, :4] = fc[-npop:, :4]
+        pop[:, unique(lpf.ik2)]  = fc[-npop:, tile(4, lpf.npb)]
+        pop[:, unique(lpf.iq1)]  = fc[-npop:, tile(5, lpf.npb)]
+        pop[:, unique(lpf.iq2)]  = fc[-npop:, tile(6, lpf.npb)]
+        pop[:, lpf.ibrp] = fc[-npop:, [7, 8]]
+        pop[:, lpf.ibcn[:hw]] = fc[-npop:, tile( 9, hw)]
+        pop[:, lpf.ibcn[hw:]] = fc[-npop:, tile(13, hw)]
+        pop[:, lpf.ibtl[:hw]] = fc[-npop:, tile(10, hw)]
+        pop[:, lpf.ibtl[hw:]] = fc[-npop:, tile(14, hw)]
+        pop[:, lpf.ibal[:hw]] = fc[-npop:, tile(11, hw)]
+        pop[:, lpf.ibal[hw:]] = fc[-npop:, tile(15, hw)]
+        pop[:, lpf.ibra[:hw]] = fc[-npop:, tile(12, hw)]
+        pop[:, lpf.ibra[hw:]] = fc[-npop:, tile(16, hw)]
+
     else:
         pop = None
         sampler.info('Couldnt find DE results, forcing a DE run')
@@ -98,6 +129,9 @@ if __name__ == '__main__':
     ## -------------
     if args.do_mc:
         sampler.info('Running MC with %i runs and %i iterations', args.mc_n_runs, args.mc_n_iterations)
+
+        ## Continue sampling from the previous run
+        ## ---------------------------------------
         if args.continue_mc and mc_exists:
             p0 = Table.read(mc_file).to_pandas().values.reshape([args.n_walkers, -1, lpf.ps.ndim])[:,-1,:]
         else:

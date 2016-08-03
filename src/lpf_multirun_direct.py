@@ -94,7 +94,6 @@ class LPFC(LPF):
 
         self.fluxes_o = copy(self.fluxes)
         self.fluxes_m = npb*[mean(self.fluxes[:npb], 0)] + npb*[mean(self.fluxes[npb:], 0)] 
-        #self.fluxes = [f/fm for f,fm in zip(self.fluxes, self.fluxes_m)]
         
         self._wrk_lc = (zeros([self.npb,self.fluxes[0].size]),
                         zeros([self.npb,self.fluxes[self.npb].size]))
@@ -210,8 +209,7 @@ class LPFC(LPF):
 
                 
     def lnposterior(self, pv):
-        #_k = sqrt(pv[self.ik2]).mean()
-        return super(LPFC,self).lnposterior(pv) #+ self.prior_kw.log(_k)                
+        return super(LPFC,self).lnposterior(pv)
 
         
     def compute_transit(self, pv):
@@ -246,7 +244,6 @@ class LPFC(LPF):
         ra_term_2 = np.cos(pv[self.ibrp[1:]][:,newaxis] + self.rotang[self.npb])
         ra_term_1 = pv[self.ibra[:self.npb]][:,newaxis] * (ra_term_1 - ra_term_1.mean()) / ra_term_1.ptp()
         ra_term_2 = pv[self.ibra[self.npb:]][:,newaxis] * (ra_term_2 - ra_term_2.mean()) / ra_term_2.ptp()
-        #ra_term_1 = pv[self.ibra[:self.npb]][:,newaxis] * np.cos(pv[self.ibrp[:1]][:,newaxis] + pv[self.ibrf[:1]][:,newaxis]*self.rotang[0]))
 
         bl1 = ( pv[self.ibcn[:self.npb]][:,newaxis]
               + pv[self.ibtl[:self.npb]][:,newaxis] * self.ctimes[0]
@@ -284,28 +281,6 @@ class LPFC(LPF):
                 return inf
             return ((self.fluxes[i][m]-baseline(pv,i)[m])**2).sum()
          
-        # pvt = pvpop.copy()
-        # rp, rf = zeros(self.nlc), zeros(self.nlc)
-        # for i in range(self.nlc):
-        #     m = ~self.otmasks[i]
-        #     pv0 = fmin(minfun, [1, 0, 0, 0.01, 0, 1], disp=False, ftol=1e-9, xtol=1e-9)
-        #     pvt[:,self.ibcn[i]] = normal(pv0[0], 0.001,            size=pvt.shape[0])
-        #     pvt[:,self.ibtl[i]] = normal(pv0[1], 0.01*abs(pv0[1]), size=pvt.shape[0])
-        #     pvt[:,self.ibal[i]] = normal(pv0[2], 0.01*abs(pv0[2]), size=pvt.shape[0])
-        #     pvt[:,self.ibra[i]] = uniform(0, 0.02, size=pvt.shape[0])
-        #     #np.abs(normal(pv0[3], 0.01*abs(pv0[3]), size=pvt.shape[0]))
-        #     #rp[i] = pv0[4]
-        #     #ref[i] = pv0[5]
-        # pvt[:, self.ibrp[0]] = normal(0, 0.1, size=pvt.shape[0])
-        # pvt[:, self.ibrp[1]] = normal(0, 0.1, size=pvt.shape[0])
-        # pvt[:, self.ibrf[0]] = normal(1, 0.1, size=pvt.shape[0])
-        # pvt[:, self.ibrf[1]] = normal(1, 0.1, size=pvt.shape[0])
-        # #pvt[:,self.ibrp[0]] = np.abs(normal(rp.mean(), rp.std(), size=pvt.shape[0]))
-        # #pvt[:,self.ibrp[1]] = np.abs(normal(rp.mean(), rp.std(), size=pvt.shape[0]))
-        # #pvt[:,self.ibrf[0]] = np.clip(normal(rf.mean(), rf.std(), size=pvt.shape[0]), 0.26, 3.8)
-        # #pvt[:,self.ibrf[1]] = np.clip(normal(rf.mean(), rf.std(), size=pvt.shape[0]), 0.26, 3.8)
-        # return pvt
-
         pvt = pvpop.copy()
         pvb = zeros([self.nlc, 5])
         for i in range(self.nlc):
@@ -325,10 +300,6 @@ class LPFC(LPF):
             pvt[:, self.ibtl[s]] = normal(pvm[1], pvs[1], size=[pvt.shape[0], self.npb])
             pvt[:, self.ibal[s]] = normal(pvm[2], pvs[2], size=[pvt.shape[0], self.npb])
             pvt[:, self.ibra[s]] = np.clip(normal(pvm[3], pvs[3], size=[pvt.shape[0], self.npb]), 0, 0.5)
-        #pvt[:, self.ibrp[0]] = normal(pvm1[4], pvs1[4], size=pvt.shape[0])
-        #pvt[:, self.ibrp[1]] = normal(pvm2[4], pvs2[4], size=pvt.shape[0])
-        #pvt[:, self.ibrf[0]] = normal(pvm1[5], pvs1[5], size=pvt.shape[0])
-        #pvt[:, self.ibrf[1]] = normal(pvm2[5], pvs2[5], size=pvt.shape[0])
         return pvt
 
 

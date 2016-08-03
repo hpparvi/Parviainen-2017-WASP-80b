@@ -41,13 +41,15 @@ class Sampler(object):
                 
         if not notebook:
             self.logger  = logging.getLogger()
-            logfile = open('{:s}_{:s}.log'.format(basename(result_file), run_name.replace('/','_')), mode='w')
+            logfile = open('{:s}.log'.format(run_name.replace('/','_')), mode='w')
             fh = logging.StreamHandler(logfile)
             fh.setLevel(logging.DEBUG)
             self.logger.addHandler(fh)
             self.info = self.logger.info
+            self.error = self.logger.error
         else:
             self.info = lambda str: None
+            self.error = lambda str: None
 
         if notebook:
             self.disp = print_nb
@@ -65,7 +67,8 @@ class Sampler(object):
         if population is not None:
             self.de._population[:] = population
         else:
-            #self.de._population[:] = self.lpf.fit_baseline(self.de.population)
+            if '_dw_' in self.run_name:
+                self.de._population[:] = self.lpf.fit_baseline(self.de.population)
             if self.lpf.use_ldtk:
                 self.de._population[:] = self.lpf.fit_ldc(self.de.population, emul=2.)
 

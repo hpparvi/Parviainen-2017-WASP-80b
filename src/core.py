@@ -26,7 +26,7 @@ from scipy.ndimage import median_filter as MF
 from scipy.ndimage import gaussian_filter1d as gf
 from scipy.ndimage import label, binary_erosion
 
-from numpy import pi, array, exp, abs, sum, zeros_like, arange, concatenate, argsort, s_
+from numpy import pi, array, exp, abs, sum, zeros_like, arange, concatenate, argsort, s_, tile, unique
 from scipy.constants import k, G, proton_mass
 from scipy.optimize import fmin_powell, fmin
 
