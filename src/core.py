@@ -5,7 +5,7 @@ import sys
 import math as m
 import logging
 
-import pyfits as pf
+import astropy.io.fits as pf
 import pandas as pd
 import numpy as  np
 import seaborn as sb
@@ -35,45 +35,45 @@ N = lambda a: a/np.median(a)
 try:
     from pyfc import psf_g1d, logl_g1d
 except ImportError:
-    print "Couldn't import PyFC"
+    print("Couldn't import PyFC")
     
 try:
     from ldtk import LDPSetCreator, BoxcarFilter, TabulatedFilter
 except ImportError:
-    print "Couldn't import ldTK"
+    print("Couldn't import ldTK")
     
 try:
     from pyde.de import DiffEvol
 except ImportError:
-    print "Couldn't import PyDE"
+    print("Couldn't import PyDE")
 
 try:
     from exotk.constants import rjup, mjup, rsun, msun
     from exotk.utils.misc import fold
 except ImportError:
-    print "Couldn't import ExoTK"
-    print "Please install ExoTK from GitHub"
-    print "    git clone git@github.com:hpparvi/PyExoTK.git"
-    print "    cd PyExoTK"
-    print "    python setup.py install --user "
-    print ""
+    print("Couldn't import ExoTK")
+    print("Please install ExoTK from GitHub")
+    print("    git clone git@github.com:hpparvi/PyExoTK.git")
+    print("    cd PyExoTK")
+    print("    python setup.py install --user ")
+    print("")
 
 try:
     from emcee import EnsembleSampler
 except ImportError:
-    print "Couldn't import emcee, please install it..."
+    print("Couldn't import emcee, please install it...")
             
 try:
     from george import GP, HODLRSolver
     from george.kernels import ExpKernel, ExpSquaredKernel
     with_george = True
 except ImportError:
-    print "Error, couldn't import george. Anything depending on GPs won't work"
-    print "Please install george from github"
-    print "    git clone https://github.com/dfm/george.git"
-    print "    cd george"
-    print "    python setup.py install --user "
-    print ""
+    print("Error, couldn't import george. Anything depending on GPs won't work")
+    print("Please install george from github")
+    print("    git clone https://github.com/dfm/george.git")
+    print("    cd george")
+    print("    python setup.py install --user ")
+    print("")
     with_george = False
 
 logging.basicConfig(level=logging.DEBUG, format='%(levelname)s %(name)s: %(message)s')
