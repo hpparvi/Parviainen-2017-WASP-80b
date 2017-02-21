@@ -123,6 +123,7 @@ l_obj  = [sorted(glob(join(do, '*.fits')))[2:] for do in DOBJ]
 
 DFILE_EXT = abspath(join(W80ROOT,'data','external_lcs.h5'))
 DRESULT = join(W80ROOT, 'results')
+DDATA   = join(W80ROOT, 'data')
 RFILE_EXT = abspath(join(DRESULT,'external.h5'))
 RFILE_GTC = abspath(join(DRESULT,'osiris.h5'))
 

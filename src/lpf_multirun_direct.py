@@ -4,7 +4,6 @@ from itertools import chain
 from numpy import *
 
 from scipy.signal import medfilt as MF
-from scipy.stats import scoreatpercentile as sap
 from numpy.random import normal, uniform
 
 from .core import *
@@ -13,19 +12,19 @@ from .extcore import *
 
 from math import pi
 
-class LPFC(LPF):
-    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=4, mask_ingress=False, noise='white', pipeline='hp'):
+class LPFMD(LPF):
+    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, mask_ingress=False, noise='white', pipeline='hp'):
         assert passband in ['w','bb','nb','K','Na']
         assert lctype in ['target', 'relative']
         assert noise in ['white', 'red']
         assert pipeline in ['hp','gc']
 
         if pipeline == 'hp':
-            self.df1 = df1 = pd.merge(pd.read_hdf('../data/aux.h5','night1'),
-                                      pd.read_hdf('../results/gtc_light_curves.h5','night1'),
+            self.df1 = df1 = pd.merge(pd.read_hdf(join(DDATA, 'aux.h5'), 'night1'),
+                                      pd.read_hdf(join(DRESULT, 'gtc_light_curves.h5'), 'night1'),
                                       left_index=True, right_index=True)
-            self.df2 = df2 = pd.merge(pd.read_hdf('../data/aux.h5','night2'),
-                                      pd.read_hdf('../results/gtc_light_curves.h5','night2'),
+            self.df2 = df2 = pd.merge(pd.read_hdf(join(DDATA, 'aux.h5'), 'night2'),
+                                      pd.read_hdf(join(DRESULT, 'gtc_light_curves.h5'), 'night2'),
                                       left_index=True, right_index=True)
         else:
             self.df1 = df1 = pd.read_hdf(join(DRESULT,'gtc_light_curves_gc.h5'), 'night1')
@@ -91,7 +90,7 @@ class LPFC(LPF):
 
         ## Initialise the parent
         ## ---------------------
-        super(LPFC,self).__init__(times, fluxes, 2*pbs,
+        super().__init__(times, fluxes, 2*pbs,
                                   use_ldtk=False, constant_k=False, noise=noise,
                                   ldf_path='../data/external_lcs.h5', nthreads=n_threads)
         self.use_ldtk = use_ldtk
@@ -108,10 +107,8 @@ class LPFC(LPF):
         ## ----------------
         self.priors = [NP(    TC,   1e-2,   'tc'), ##  0  - Transit centre
                        NP(     P,   5e-4,    'p'), ##  1  - Period
-                       NP(  4.29,   1e-3,  'rho', lims=[3.5, 4.5]), ##  2  - Stellar density
-#                       UP(  3.50,   4.50,  'rho'), ##  2  - Stellar density
-                       NP(  0.10,   1e-3,    'b', lims=[0.0, 1.0])] ##  3  - Impact parameter
-#                       UP(  0.00,   0.99,    'b')] ##  3  - Impact parameter
+                       UP(  3.50,   4.50,  'rho'), ##  2  - Stellar density
+                       UP(  0.00,   0.99,    'b')] ##  3  - Impact parameter
         
         ## Area ratio
         ## ----------
@@ -133,8 +130,8 @@ class LPFC(LPF):
         for irun in range(2):
             self.priors.append(UP(-0.5*pi, pi, 'brp_%i'%irun)) ##  srp + irun -- Rotator angle phase
 
-        ## Baseline
-        ## --------
+        # Baseline
+        # --------
         self._sbl = len(self.priors)
         for ilc in range(self.nlc):
             self.priors.append(UP( 0.0,  2.0, 'bcn_%i'%ilc)) ##  sbl + ilc -- Baseline constant
@@ -142,8 +139,8 @@ class LPFC(LPF):
             self.priors.append(UP(-1.0,  1.0, 'bal_%i'%ilc)) ##  sbl + ilc -- Linear airmass trend
             self.priors.append(UP( 0.0, 0.50, 'bra_%i'%ilc)) ##  sbl + ilc -- Rotaror angle amplitude
 
-        ## White noise
-        ## -----------
+        # White noise
+        # -----------
         self._swn = len(self.priors)
         self.priors.extend([UP(3e-4, 4e-3, 'e_%i'%ilc) 
                             for ilc in range(self.nlc)]) ##  sqn + ilc -- Average white noise
@@ -151,16 +148,14 @@ class LPFC(LPF):
         self.ps = PriorSet(self.priors)
         self.set_pv_indices()
         
-        ## Update the priors using the external data modelling
-        ## ---------------------------------------------------
+        # Update the priors using the external data modelling
+        # ---------------------------------------------------
         fc = pd.read_hdf(RFILE_EXT, 'vkrn_ldtk/fc')
         self.priors[0] = NP(fc.tc.mean(),   20*fc.tc.std(),  'tc',  limsigma=15)
         self.priors[1] = NP(fc.p.mean(),    20*fc.p.std(),    'p',  limsigma=15)
         self.priors[2] = NP(fc.rho.mean(),  fc.rho.std(),   'rho',  limsigma=5)
         self.priors[3] = NP(fc.b.mean(),    fc.b.std(),       'b',  lims=(0,1))
 
-
-        
         if self.noise == 'red':
             for ilc,i in enumerate(self.iwn):
                 self.priors[i] = NP(7e-4, 2e-4, 'e_%i'%ilc, lims=(0,1))

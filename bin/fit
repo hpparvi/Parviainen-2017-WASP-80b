@@ -1,21 +1,16 @@
 #!/usr/bin/env python
-from numpy import array, ones_like, concatenate, s_
-from numpy.random import normal, uniform
-from argparse import ArgumentParser
-from os.path import exists
-from tqdm import tqdm
 import sys
 
-sys.path.append('..')
+from argparse import ArgumentParser
+from os.path import exists
+from emcee.utils import MPIPool
 
+sys.path.append('..')
 from src.core import *
 from src.sampler import Sampler
-
-from src.lpf_singlerun import LPFC as LPFSR
-from src.lpf_multirun  import LPFC as LPFMR
-from src.lpf_multirun_direct import LPFC as LPFMD
-
-from emcee.utils import MPIPool
+from src.lpf_singlerun import LPFSD
+from src.lpf_multirun  import LPFMR
+from src.lpf_multirun_direct import LPFMD
 
 if __name__ == '__main__':
     ap = ArgumentParser()
@@ -60,12 +55,20 @@ if __name__ == '__main__':
     mc_exists = exists(mc_file)
 
     if args.approach == 'abs':
-        lpf = LPFMD(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise, n_threads=args.n_threads, mask_ingress=args.mask_ingress, pipeline=args.pipeline)
-    else:
-        if args.nights in [1,2]:
-            lpf = LPFSR(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise, n_threads=args.n_threads, night=args.nights, mask_ingress=args.mask_ingress)
+        if args.nights == 12:
+            lpf = LPFMD(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
+                        n_threads=args.n_threads,  pipeline=args.pipeline)
         else:
-            lpf = LPFMR(args.passband, pipeline=args.pipeline, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise, n_threads=args.n_threads, mask_ingress=args.mask_ingress)
+            lpf = LPFSD(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
+                        n_threads=args.n_threads, night=args.nights, pipeline=args.pipeline)
+    elif args.approach == 'dw':
+        if args.nights == 12:
+            lpf = LPFMR(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
+                        n_threads=args.n_threads, pipeline=args.pipeline)
+        else:
+            raise NotImplementedError
+    else:
+        raise NotImplementedError
 
     def lnposterior(pv):
         return lpf.lnposterior(pv)
@@ -114,15 +117,23 @@ if __name__ == '__main__':
         pop[:, unique(lpf.ik2)]  = fc[-npop:, tile(4, lpf.npb)]
         pop[:, unique(lpf.iq1)]  = fc[-npop:, tile(5, lpf.npb)]
         pop[:, unique(lpf.iq2)]  = fc[-npop:, tile(6, lpf.npb)]
-        pop[:, lpf.ibrp] = fc[-npop:, [7, 8]]
-        pop[:, lpf.ibcn[:hw]] = fc[-npop:, tile( 9, hw)]
-        pop[:, lpf.ibcn[hw:]] = fc[-npop:, tile(13, hw)]
-        pop[:, lpf.ibtl[:hw]] = fc[-npop:, tile(10, hw)]
-        pop[:, lpf.ibtl[hw:]] = fc[-npop:, tile(14, hw)]
-        pop[:, lpf.ibal[:hw]] = fc[-npop:, tile(11, hw)]
-        pop[:, lpf.ibal[hw:]] = fc[-npop:, tile(15, hw)]
-        pop[:, lpf.ibra[:hw]] = fc[-npop:, tile(12, hw)]
-        pop[:, lpf.ibra[hw:]] = fc[-npop:, tile(16, hw)]
+        if args.nights == 12:
+            pop[:, lpf.ibrp] = fc[-npop:, [7, 8]]
+            pop[:, lpf.ibcn[:hw]] = fc[-npop:, tile( 9, hw)]
+            pop[:, lpf.ibcn[hw:]] = fc[-npop:, tile(13, hw)]
+            pop[:, lpf.ibtl[:hw]] = fc[-npop:, tile(10, hw)]
+            pop[:, lpf.ibtl[hw:]] = fc[-npop:, tile(14, hw)]
+            pop[:, lpf.ibal[:hw]] = fc[-npop:, tile(11, hw)]
+            pop[:, lpf.ibal[hw:]] = fc[-npop:, tile(15, hw)]
+            pop[:, lpf.ibra[:hw]] = fc[-npop:, tile(12, hw)]
+            pop[:, lpf.ibra[hw:]] = fc[-npop:, tile(16, hw)]
+        else:
+            hw = lpf.nlc
+            pop[:, lpf.ibrp] = fc[-npop:, [7]]
+            pop[:, lpf.ibcn] = fc[-npop:, tile(8, hw)]
+            pop[:, lpf.ibtl] = fc[-npop:, tile(9, hw)]
+            pop[:, lpf.ibal] = fc[-npop:, tile(10, hw)]
+            pop[:, lpf.ibra] = fc[-npop:, tile(11, hw)]
 
     else:
         pop = None
@@ -131,13 +142,13 @@ if __name__ == '__main__':
     if args.do_de or not de_exists:
         sampler.optimise(args.de_n_iterations, population=pop)
 
-    ## MCMC sampling
-    ## -------------
+    # MCMC sampling
+    # -------------
     if args.do_mc:
         sampler.info('Running MC with %i runs and %i iterations', args.mc_n_runs, args.mc_n_iterations)
 
-        ## Continue sampling from the previous run
-        ## ---------------------------------------
+        # Continue sampling from the previous run
+        # ---------------------------------------
         if args.continue_mc and mc_exists:
             p0 = Table.read(mc_file).to_pandas().values.reshape([args.n_walkers, -1, lpf.ps.ndim])[:,-1,:]
         else:
