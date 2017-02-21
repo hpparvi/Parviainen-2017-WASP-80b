@@ -210,10 +210,6 @@ class LPFMD(LPF):
             else:
                 self.gps[-1].compute(hps.night2.values[ilc-self.npb])
 
-                
-    def lnposterior(self, pv):
-        return super(LPFC,self).lnposterior(pv)
-
         
     def compute_transit(self, pv):
         _a  = as_from_rhop(pv[2], pv[1]) 
@@ -259,6 +255,10 @@ class LPFMD(LPF):
         return bl1, bl2
 
 
+    def lnposterior(self, pv):
+        return super(LPFC, self).lnposterior(pv)
+
+
     def lnlikelihood_wn(self, pv):
         lnlike = 0.
         for iwn, fo, fm in zip(self.iwn, self.fluxes, chain(*self.compute_lc_model(pv))):
@@ -274,36 +274,7 @@ class LPFMD(LPF):
 
     
     def fit_baseline(self, pvpop):
-        def baseline(pv, ilc):
-            ra_term = np.cos(pv[4]+self.rotang[ilc])
-            ra_term = pv[3]*(ra_term-ra_term.mean()) / ra_term.ptp()
-            return pv[0] + pv[1]*self.ctimes[ilc] + pv[2]*self.airmass[ilc] + ra_term
-
-        def minfun(pv):
-            if not (0. <= pv[4] <= pi) and (pv[3] > 0.):
-                return inf
-            return ((self.fluxes[i][m]-baseline(pv,i)[m])**2).sum()
-         
-        pvt = pvpop.copy()
-        pvb = zeros([self.nlc, 5])
-        for i in range(self.nlc):
-            m = ~self.otmasks[i]
-            pvb[i,:] = fmin(minfun, [1, 0, 0, 0.01, 0.1], disp=False, ftol=1e-9, xtol=1e-9)
-
-        s1, s2 = s_[:self.npb], s_[self.npb:]
-        pvm1, pvs1 = pvb[s1,:].mean(0), pvb[s1,:].std(0)
-        pvm2, pvs2 = pvb[s2,:].mean(0), pvb[s2,:].std(0)
-
-        if self.passband == 'w':
-            pvs1 = 0.001*np.abs(pvb[s1,:].mean(0))
-            pvs2 = 0.001*np.abs(pvb[s2,:].mean(0))
-
-        for s,pvm,pvs in zip([s1,s2],[pvm1,pvm2],[pvs1,pvs2]):
-            pvt[:, self.ibcn[s]] = normal(pvm[0], 0.001,  size=[pvt.shape[0], self.npb])
-            pvt[:, self.ibtl[s]] = normal(pvm[1], pvs[1], size=[pvt.shape[0], self.npb])
-            pvt[:, self.ibal[s]] = normal(pvm[2], pvs[2], size=[pvt.shape[0], self.npb])
-            pvt[:, self.ibra[s]] = np.clip(normal(pvm[3], pvs[3], size=[pvt.shape[0], self.npb]), 0, 0.5)
-        return pvt
+        raise NotImplementedError
 
 
     def fit_ldc(self, pvpop, emul=1.):
