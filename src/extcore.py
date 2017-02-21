@@ -1,5 +1,5 @@
-from core import *
-from lpf import *
+from .core import *
+from .lpf import *
 
 class Sampler(object):
     def __init__(self, result_file, run_name, lpf, npop, niter_de, niter_mc):

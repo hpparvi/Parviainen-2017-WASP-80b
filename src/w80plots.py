@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as pl
 import seaborn as sb
 from numpy import asarray, zeros
-from core import *
+from .core import *
 
 def wavelength_to_rgb(wavelength, gamma=0.8):
 

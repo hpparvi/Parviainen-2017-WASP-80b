@@ -201,7 +201,7 @@ except IOError:
     pass
         
 pb_filters_nb = [GeneralGaussian('nb{:02d}'.format(i+1), 527+20*i, 10, 15) for i in range(20)]
-pb_filters_nb[12] = GeneralGaussian('nb12', 769.95, 5.45, 15)
+pb_filters_nb[12] = GeneralGaussian('nb13', 769.95, 5.45, 15)
 pb_filters_k  = ([GeneralGaussian('K{:02d}'.format(i+1),  740.2+6*i, 3, 15) for i in range(3)]
                      + [GeneralGaussian('K{:02d}'.format(i+1),  768.2+6*i, 3, 15) for i in range(5)])
 for i,f in enumerate(pb_filters_k):

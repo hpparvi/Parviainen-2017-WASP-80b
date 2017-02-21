@@ -9,7 +9,7 @@ from exotk.priors import PriorSet, UP, NP, JP
 from exotk.utils.orbits import as_from_rhop
 from exotk.utils.likelihood import ll_normal_es
 
-from core import *
+from .core import *
 
 def map_qq_to_uv(q1,q2):
     a,b = sqrt(q1), 2.*q2

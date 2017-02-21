@@ -7,31 +7,35 @@ from scipy.signal import medfilt as MF
 from scipy.stats import scoreatpercentile as sap
 from numpy.random import normal, uniform
 
-from core import *
-from lpf import *
-from extcore import *
+from .core import *
+from .lpf import *
+from .extcore import *
 
 from math import pi
 
 class LPFC(LPF):
-    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=4, mask_ingress=False, noise='white'):
-        
-        self.df1 = df1 = pd.merge(pd.read_hdf('../data/aux.h5','night1'),
-                                  pd.read_hdf('../results/gtc_light_curves.h5','night1'),
-                                  left_index=True, right_index=True)
-        self.df2 = df2 = pd.merge(pd.read_hdf('../data/aux.h5','night2'),
-                                  pd.read_hdf('../results/gtc_light_curves.h5','night2'),
-                                  left_index=True, right_index=True)
-
-        assert passband in ['w', 'bb','nb','K','Na']
+    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=4, mask_ingress=False, noise='white', pipeline='hp'):
+        assert passband in ['w','bb','nb','K','Na']
         assert lctype in ['target', 'relative']
         assert noise in ['white', 'red']
+        assert pipeline in ['hp','gc']
+
+        if pipeline == 'hp':
+            self.df1 = df1 = pd.merge(pd.read_hdf('../data/aux.h5','night1'),
+                                      pd.read_hdf('../results/gtc_light_curves.h5','night1'),
+                                      left_index=True, right_index=True)
+            self.df2 = df2 = pd.merge(pd.read_hdf('../data/aux.h5','night2'),
+                                      pd.read_hdf('../results/gtc_light_curves.h5','night2'),
+                                      left_index=True, right_index=True)
+        else:
+            self.df1 = df1 = pd.read_hdf(join(DRESULT,'gtc_light_curves_gc.h5'), 'night1')
+            self.df2 = df2 = pd.read_hdf(join(DRESULT,'gtc_light_curves_gc.h5'), 'night2')
         
         self.passband = passband        
-        if passband in ['w', 'bb']:
+        if passband == 'bb':
             cols = ['{:s}_{:s}'.format(lctype, pb) for pb in 'g r i z'.split()]
             self.filters = pb_filters_bb
-        elif passband == 'nb':
+        elif passband in ['w', 'nb']:
             cols = [c for c in self.df1.columns if lctype+'_nb' in c]
             self.filters = pb_filters_nb
         elif passband == 'K':
@@ -53,7 +57,7 @@ class LPFC(LPF):
         npb = len(pbs)
 
         times  = npb*[df1.bjd.values-TZERO]+npb*[df2.bjd.values-TZERO]
-        fluxes = [f/median(f) for f in fluxes]
+        fluxes = [f/nanmedian(f) for f in fluxes]
 
         self.otimes = times
         
@@ -104,8 +108,10 @@ class LPFC(LPF):
         ## ----------------
         self.priors = [NP(    TC,   1e-2,   'tc'), ##  0  - Transit centre
                        NP(     P,   5e-4,    'p'), ##  1  - Period
-                       UP(  3.50,   4.50,  'rho'), ##  2  - Stellar density
-                       UP(  0.00,   0.99,    'b')] ##  3  - Impact parameter
+                       NP(  4.29,   1e-3,  'rho', lims=[3.5, 4.5]), ##  2  - Stellar density
+#                       UP(  3.50,   4.50,  'rho'), ##  2  - Stellar density
+                       NP(  0.10,   1e-3,    'b', lims=[0.0, 1.0])] ##  3  - Impact parameter
+#                       UP(  0.00,   0.99,    'b')] ##  3  - Impact parameter
         
         ## Area ratio
         ## ----------
@@ -153,6 +159,8 @@ class LPFC(LPF):
         self.priors[2] = NP(fc.rho.mean(),  fc.rho.std(),   'rho',  limsigma=5)
         self.priors[3] = NP(fc.b.mean(),    fc.b.std(),       'b',  lims=(0,1))
 
+
+        
         if self.noise == 'red':
             for ilc,i in enumerate(self.iwn):
                 self.priors[i] = NP(7e-4, 2e-4, 'e_%i'%ilc, lims=(0,1))
@@ -168,7 +176,7 @@ class LPFC(LPF):
         if use_ldtk:
             self.sc = LDPSetCreator([4150,100], [4.6,0.2], [-0.14,0.16], self.filters)
             self.lp = self.sc.create_profiles(2000)
-            #self.lp.resample_linear_z()
+            self.lp.resample_linear_z()
             #self.lp.set_uncertainty_multiplier(2)
             
             

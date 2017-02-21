@@ -1,8 +1,8 @@
 from time import time
 from tqdm import tqdm
 
-from core import *
-from w80plots import *
+from .core import *
+from .w80plots import *
 
 from matplotlib.backends.backend_pdf import PdfPages
 

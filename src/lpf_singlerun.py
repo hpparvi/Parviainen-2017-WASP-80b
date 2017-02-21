@@ -7,9 +7,9 @@ from scipy.signal import medfilt as MF
 from scipy.stats import scoreatpercentile as sap
 from numpy.random import normal
 
-from core import *
-from lpf import *
-from extcore import *
+from .core import *
+from .lpf import *
+from .extcore import *
 
 class LPFC(LPF):
     def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=4, night=2, mask_ingress=False, noise='white'):

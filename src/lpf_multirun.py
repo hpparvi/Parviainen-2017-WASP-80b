@@ -7,24 +7,28 @@ from scipy.signal import medfilt as MF
 from scipy.stats import scoreatpercentile as sap
 from numpy.random import normal
 
-from core import *
-from lpf import *
-from extcore import *
+from .core import *
+from .lpf import *
+from .extcore import *
 
 class LPFC(LPF):
-    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=4, mask_ingress=False, noise='white'):
-        
-        self.df1 = df1 = pd.merge(pd.read_hdf('../data/aux.h5','night1'),
-                                  pd.read_hdf('../results/gtc_light_curves.h5','night1'),
-                                  left_index=True, right_index=True)
-        self.df2 = df2 = pd.merge(pd.read_hdf('../data/aux.h5','night2'),
-                                  pd.read_hdf('../results/gtc_light_curves.h5','night2'),
-                                  left_index=True, right_index=True)
-
+    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, mask_ingress=False, noise='white', pipeline='hp'):
         assert passband in ['bb','nb','K','Na']
         assert lctype in ['target', 'relative']
         assert noise in ['white', 'red']
-        
+        assert pipeline in ['hp','gc']
+
+        if pipeline == 'hp':
+            self.df1 = df1 = pd.merge(pd.read_hdf('../data/aux.h5','night1'),
+                                      pd.read_hdf('../results/gtc_light_curves.h5','night1'),
+                                      left_index=True, right_index=True)
+            self.df2 = df2 = pd.merge(pd.read_hdf('../data/aux.h5','night2'),
+                                      pd.read_hdf('../results/gtc_light_curves.h5','night2'),
+                                      left_index=True, right_index=True)
+        else:
+            self.df1 = df1 = pd.read_hdf(join(DRESULT,'gtc_light_curves_gc.h5'), 'night1')
+            self.df2 = df2 = pd.read_hdf(join(DRESULT,'gtc_light_curves_gc.h5'), 'night2')
+
         self.passband = passband        
         if passband == 'bb':
             cols = ['{:s}_{:s}'.format(lctype, pb) for pb in 'g r i z'.split()]
@@ -44,7 +48,7 @@ class LPFC(LPF):
 
         times  = npb*[df1.bjd.values-TZERO]+npb*[df2.bjd.values-TZERO]
         fluxes = (list(df1[cols].values.T) + list(df2[cols].values.T))
-        fluxes = [f/median(f) for f in fluxes]
+        fluxes = [f/nanmedian(f) for f in fluxes]
         
         ## Mask outliers
         ## -------------
@@ -148,7 +152,7 @@ class LPFC(LPF):
         if use_ldtk:
             self.sc = LDPSetCreator([4150,100], [4.6,0.2], [-0.14,0.16], self.filters)
             self.lp = self.sc.create_profiles(2000)
-            #self.lp.resample_linear_z()
+            self.lp.resample_linear_z()
             #self.lp.set_uncertainty_multiplier(2)
             
             

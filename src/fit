@@ -3,13 +3,17 @@ from numpy import array, ones_like, concatenate, s_
 from numpy.random import normal, uniform
 from argparse import ArgumentParser
 from os.path import exists
+from tqdm import tqdm
+import sys
 
-from core import *
-from sampler import Sampler
+sys.path.append('..')
 
-from lpf_singlerun import LPFC as LPFSR
-from lpf_multirun  import LPFC as LPFMR
-from lpf_multirun_direct import LPFC as LPFMD
+from src.core import *
+from src.sampler import Sampler
+
+from src.lpf_singlerun import LPFC as LPFSR
+from src.lpf_multirun  import LPFC as LPFMR
+from src.lpf_multirun_direct import LPFC as LPFMD
 
 from emcee.utils import MPIPool
 
@@ -17,14 +21,14 @@ if __name__ == '__main__':
     ap = ArgumentParser()
     ap.add_argument('--use-ldtk', action='store_true', default=False)
     ap.add_argument('--passband', type=str, choices=['w', 'bb', 'nb', 'K', 'Na'])
+    ap.add_argument('--pipeline', type=str, choices=['hp', 'gc'])
     ap.add_argument('--nights', type=int, choices=[1, 2, 12])
     ap.add_argument('--approach', type=str, choices=['dw','abs'], default='dw')
     ap.add_argument('--lc-type', type=str, choices=['target','relative'], default='target')
     ap.add_argument('--noise', type=str, choices=['white', 'red'])
     ap.add_argument('--mask-ingress', action='store_true', default=False)
     ap.add_argument('--n-walkers',       type=int, default=600)
-    ap.add_argument('--n-threads',       type=int, default=4)
-    ap.add_argument('--night',           type=int, default=2)
+    ap.add_argument('--n-threads',       type=int, default=1)
     ap.add_argument('--do-de', action='store_true', default=False)
     ap.add_argument('--do-mc', action='store_true', default=False)
     ap.add_argument('--dont-continue-de', dest='continue_de', action='store_false', default=True)
@@ -40,9 +44,10 @@ if __name__ == '__main__':
     ap.add_argument('--mc-update-interval', type=int, default=  10)
     args = ap.parse_args()
 
-    fname_template = 'gtc_{approach:s}_{pb:s}_n{nights:s}_{lctype:s}_{noise:s}_{ldtk:s}{ingress:s}'
+    fname_template = 'gtc_{pipeline:s}_{approach:s}_{pb:s}_n{nights:s}_{lctype:s}_{noise:s}_{ldtk:s}{ingress:s}'
 
-    fname = fname_template.format(approach=args.approach,
+    fname = fname_template.format(pipeline=args.pipeline,
+                                  approach=args.approach,
                                   pb=args.passband, nights=str(args.nights),
                                   lctype=args.lc_type, noise=args.noise,
                                   ldtk='ldtk' if args.use_ldtk else 'noldtk',
@@ -55,12 +60,12 @@ if __name__ == '__main__':
     mc_exists = exists(mc_file)
 
     if args.approach == 'abs':
-        lpf = LPFMD(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise, n_threads=args.n_threads, mask_ingress=args.mask_ingress)
+        lpf = LPFMD(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise, n_threads=args.n_threads, mask_ingress=args.mask_ingress, pipeline=args.pipeline)
     else:
         if args.nights in [1,2]:
             lpf = LPFSR(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise, n_threads=args.n_threads, night=args.nights, mask_ingress=args.mask_ingress)
         else:
-            lpf = LPFMR(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise, n_threads=args.n_threads, mask_ingress=args.mask_ingress)
+            lpf = LPFMR(args.passband, pipeline=args.pipeline, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise, n_threads=args.n_threads, mask_ingress=args.mask_ingress)
 
     def lnposterior(pv):
         return lpf.lnposterior(pv)
@@ -88,11 +93,12 @@ if __name__ == '__main__':
         pop = Table.read(de_file).to_pandas().values
         sampler.info('Continuing DE from a previous run')
     elif args.approach == 'abs' and args.passband != 'w':
-        white_file = fname_template.format(approach=args.approach, pb='w', nights=str(args.nights),
+        white_file = fname_template.format(pipeline=args.pipeline, 
+                                           approach=args.approach, pb='w', nights=str(args.nights),
                                            lctype=args.lc_type, noise=args.noise,
                                            ldtk='ldtk' if args.use_ldtk else 'noldtk',
                                            ingress='_noingress' if args.mask_ingress else '')
-        white_file = join(DRESULT,white_file+'_mc.fits')
+        white_file = join(DRESULT, white_file+'_mc.fits')
 
         if not exists(white_file):
             sampler.error('White LC error doesn\'t exist')
