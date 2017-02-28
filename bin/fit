@@ -2,15 +2,19 @@
 import sys
 
 from argparse import ArgumentParser
+from os import makedirs
 from os.path import exists
 from emcee.utils import MPIPool
 
 sys.path.append('..')
 from src.core import *
 from src.sampler import Sampler
-from src.lpf_singlerun import LPFSD
-from src.lpf_multirun  import LPFMR
-from src.lpf_multirun_direct import LPFMD
+from src.lpfsd import LPFSD
+from src.lpfsr import LPFSR
+from src.lpfmr import LPFMR
+from src.lpfmd import LPFMD
+from src.lpfmd2 import LPFMD2
+from src.lpfmd3 import LPFMD3
 
 if __name__ == '__main__':
     ap = ArgumentParser()
@@ -18,7 +22,7 @@ if __name__ == '__main__':
     ap.add_argument('--passband', type=str, choices=['w', 'bb', 'nb', 'K', 'Na'])
     ap.add_argument('--pipeline', type=str, choices=['hp', 'gc'])
     ap.add_argument('--nights', type=int, choices=[1, 2, 12])
-    ap.add_argument('--approach', type=str, choices=['dw','abs'], default='dw')
+    ap.add_argument('--approach', type=str, choices=['dw','abs','absc','abss'], default='dw')
     ap.add_argument('--lc-type', type=str, choices=['target','relative'], default='target')
     ap.add_argument('--noise', type=str, choices=['white', 'red'])
     ap.add_argument('--mask-ingress', action='store_true', default=False)
@@ -39,17 +43,17 @@ if __name__ == '__main__':
     ap.add_argument('--mc-update-interval', type=int, default=  10)
     args = ap.parse_args()
 
-    fname_template = 'gtc_{pipeline:s}_{approach:s}_{pb:s}_n{nights:s}_{lctype:s}_{noise:s}_{ldtk:s}{ingress:s}'
+    fname_template = '{approach:s}_{pb:s}_n{nights:s}_{lctype:s}_{noise:s}_{ldtk:s}'
 
-    fname = fname_template.format(pipeline=args.pipeline,
-                                  approach=args.approach,
+    fname = fname_template.format(approach=args.approach,
                                   pb=args.passband, nights=str(args.nights),
                                   lctype=args.lc_type, noise=args.noise,
-                                  ldtk='ldtk' if args.use_ldtk else 'noldtk',
-                                  ingress='_noingress' if args.mask_ingress else '')
+                                  ldtk='ldtk' if args.use_ldtk else 'noldtk')
 
-    de_file = join(DRESULT, fname+'_de.fits')
-    mc_file = join(DRESULT, fname+'_mc.fits')
+    resdir = join(DRESULT, 'trspec', args.pipeline)
+    de_file = join(resdir, fname+'_de.fits')
+    mc_file = join(resdir, fname+'_mc.fits')
+    makedirs(resdir, exist_ok=True)
 
     de_exists = exists(de_file)
     mc_exists = exists(mc_file)
@@ -61,12 +65,25 @@ if __name__ == '__main__':
         else:
             lpf = LPFSD(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
                         n_threads=args.n_threads, night=args.nights, pipeline=args.pipeline)
+    if args.approach == 'absc':
+        if args.nights == 12:
+            lpf = LPFMD2(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
+                        n_threads=args.n_threads,  pipeline=args.pipeline)
+        else:
+            raise NotImplementedError
+    if args.approach == 'abss':
+        if args.nights == 12:
+            lpf = LPFMD3(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
+                        n_threads=args.n_threads,  pipeline=args.pipeline)
+        else:
+            raise NotImplementedError
     elif args.approach == 'dw':
         if args.nights == 12:
             lpf = LPFMR(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
                         n_threads=args.n_threads, pipeline=args.pipeline)
         else:
-            raise NotImplementedError
+            lpf = LPFSR(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
+                        n_threads=args.n_threads, night=args.nights, pipeline=args.pipeline)
     else:
         raise NotImplementedError
 
@@ -78,7 +95,7 @@ if __name__ == '__main__':
         pool.wait()
         sys.exit(0)
 
-    sampler = Sampler(join(DRESULT,fname), fname, lpf, lnposterior, args.n_walkers, mc_thin=args.mc_thin,
+    sampler = Sampler(fname, de_file, mc_file, lpf, lnposterior, args.n_walkers, mc_thin=args.mc_thin,
                       mc_nruns=args.mc_n_runs, pool=pool, notebook=False,
                       de_iupdate=args.de_update_interval, de_isave=args.de_save_interval,
                       mc_iupdate=args.mc_update_interval, mc_isave=args.mc_save_interval)
@@ -87,21 +104,19 @@ if __name__ == '__main__':
     sampler.info('Run name %s', fname)
     sampler.info('Population size %i', args.n_walkers)
     
-    ## Differential evolution
-    ## ----------------------
-    ## DE population can either start from a) scratch, b) previous run with same noise
-    ## model, or c) white-noise run if running a red-noise model.
-    ##
+    # Differential evolution
+    # ----------------------
+    # DE population can either start from a) scratch, b) previous run with same noise
+    # model, or c) white-noise run if running a red-noise model.
+    #
     if de_exists:
         pop = Table.read(de_file).to_pandas().values
         sampler.info('Continuing DE from a previous run')
-    elif args.approach == 'abs' and args.passband != 'w':
-        white_file = fname_template.format(pipeline=args.pipeline, 
-                                           approach=args.approach, pb='w', nights=str(args.nights),
+    elif isinstance(lpf, (LPFMD,LPFMD2,LPFMD3)) and args.passband != 'w':
+        white_file = fname_template.format(approach=args.approach, pb='w', nights=str(args.nights),
                                            lctype=args.lc_type, noise=args.noise,
-                                           ldtk='ldtk' if args.use_ldtk else 'noldtk',
-                                           ingress='_noingress' if args.mask_ingress else '')
-        white_file = join(DRESULT, white_file+'_mc.fits')
+                                           ldtk='ldtk' if args.use_ldtk else 'noldtk')
+        white_file = join(resdir, white_file+'_mc.fits')
 
         if not exists(white_file):
             sampler.error('White LC error doesn\'t exist')
@@ -127,6 +142,10 @@ if __name__ == '__main__':
             pop[:, lpf.ibal[hw:]] = fc[-npop:, tile(15, hw)]
             pop[:, lpf.ibra[:hw]] = fc[-npop:, tile(12, hw)]
             pop[:, lpf.ibra[hw:]] = fc[-npop:, tile(16, hw)]
+            if isinstance(lpf, LPFMD2):
+                pop[:,-1:] = fc[-npop:, -1:]
+            if isinstance(lpf, LPFMD3):
+                pop[:,-2:] = fc[-npop:, -2:]
         else:
             hw = lpf.nlc
             pop[:, lpf.ibrp] = fc[-npop:, [7]]

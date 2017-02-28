@@ -215,6 +215,8 @@ pb_centers_nb = [f.c for f in pb_filters_nb]
 pb_centers_k  = [f.c for f in pb_filters_k]
 pb_centers_na = [f.c for f in pb_filters_na]
 
+pb_centers = dict(nb=pb_centers_nb, bb=pb_centers_bb, k=pb_centers_k, na=pb_centers_na, w=[np.mean(pb_centers_nb)])
+
 fs = [f(f.wl) for f in pb_filters_bb]
 fs = [np.where(f>0.01, f, np.nan) for f in fs]
 tt = [500]+[pb_filters_bb[0].wl[np.nanargmin(abs(fs[i+1]-fs[i]))] for i in range(3)]+[900]

@@ -1,17 +1,15 @@
 import sys
 from copy import copy
-from itertools import chain
 from numpy import *
 
 from scipy.signal import medfilt as MF
-from scipy.stats import scoreatpercentile as sap
 from numpy.random import normal
 
 from .core import *
 from .lpf import *
 from .extcore import *
 
-class LPFSD(LPF):
+class LPFSR(LPF):
     def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, night=2, mask_ingress=False, noise='white', pipeline='gc'):
         assert passband in ['w', 'bb', 'nb', 'K', 'Na']
         assert lctype in ['target', 'relative']
@@ -19,11 +17,14 @@ class LPFSD(LPF):
         assert pipeline in ['hp', 'gc']
         assert night in [1,2]
 
-        self.night = night
-        self.df = df = pd.merge(pd.read_hdf(join(DDATA, 'aux.h5'),'night%i'%night),
-                                pd.read_hdf(join(DRESULT, 'gtc_light_curves.h5'),'night%i'%night),
-                                left_index=True, right_index=True)
+        if pipeline == 'hp':
+            self.df = df = pd.merge(pd.read_hdf(join(DDATA, 'aux.h5'), 'night%i'%night),
+                                      pd.read_hdf(join(DRESULT, 'gtc_light_curves.h5'), 'night%i'%night),
+                                      left_index=True, right_index=True)
+        else:
+            self.df = df = pd.read_hdf(join(DRESULT,'gtc_light_curves_gc.h5'), 'night%i'%night)
 
+        self.night = night
         self.passband = passband        
         if passband == 'bb':
             cols = ['{:s}_{:s}'.format(lctype, pb) for pb in 'g r i z'.split()]
@@ -40,18 +41,18 @@ class LPFSD(LPF):
 
         if passband == 'w':
             pbs = ['w']
-            fluxes = [df[cols].values.mean(1)]
+            fluxes = df[cols].values.mean(1)
             NN = lambda a: a / a.max()
             self.filters = [
                 TabulatedFilter('white', pb_filters_bb[0].wl, NN(array([f.tm for f in pb_filters_bb]).mean(0)))]
         else:
             pbs = [c.split('_')[1] for c in cols]
-            fluxes = list(df[cols].values.T)
+            fluxes = df[cols].values.T
 
         npb = len(pbs)
-        times  = npb*[df.bjd.values-TZERO]
-        fluxes = [f/median(f) for f in fluxes]
-        
+        times  = df.bjd.values - TZERO
+        fluxes /= nanmedian(fluxes, 1)[:,newaxis]
+
         ## Mask outliers
         ## -------------
         lim = 0.006
@@ -62,28 +63,28 @@ class LPFSD(LPF):
             if lctype == 'relative' and self.night == 1:
                 self.mask &= (times[0] < 855.528) | (times[0] > 855.546)
 
-        times   = [times[i][self.mask]  for i in range(npb)]
-        fluxes  = [fluxes[i][self.mask] for i in range(npb)]
+        times   = times[self.mask]
+        fluxes  = fluxes[:,self.mask]
 
         fc = pd.read_hdf(RFILE_EXT, 'vkrn_ldtk/fc')
-        self.otmasks = [abs(fold(t, fc.p.mean(), fc.tc.mean(), 0.5)-0.5) < 0.0134 for t in times]
-        self.rotang  = df.rotang[self.mask].values
+        self.otmasks = abs(fold(times, fc.p.mean(), fc.tc.mean(), 0.5)-0.5) < 0.0134
+        self.rotang  = np.radians(df.rotang[self.mask].values)
         self.elevat  = df.elevat[self.mask].values
         self.airmass = df.airmass[self.mask].values
-        self.ctimes  = [t-t.mean() for t in times]
+        self.ctimes  = times-times.mean()
         
         # Initialise the parent
         # ---------------------
         super().__init__(times, fluxes, pbs,
-                                  use_ldtk=False, constant_k=False, noise='white',
-                                  ldf_path='../data/external_lcs.h5', nthreads=n_threads)
+                         use_ldtk=False, constant_k=False, noise='white',
+                         ldf_path='../data/external_lcs.h5', nthreads=n_threads)
         self.use_ldtk = use_ldtk
 
-        self.fluxes_o = copy(self.fluxes)
-        self.fluxes_m = npb*[mean(self.fluxes[:npb], 0)]
-        #self.fluxes = [f/fm for f,fm in zip(self.fluxes, self.fluxes_m)]
-        
-        self._wrk_lc = zeros([self.npb,self.fluxes[0].size])
+        self.fluxes_o = self.fluxes.copy()
+        self.fluxes_m = self.fluxes.mean(0)
+        self.fluxes /= self.fluxes_m
+        self.npt = self.times.size
+        self._wrk_lc = zeros_like(self.fluxes)
 
         # Setup priors
         # ------------
@@ -108,10 +109,6 @@ class LPFSD(LPF):
             self.priors.extend([UP(0, 1, 'q1_%i'%ipb),      ##  sq1 + 2*ipb -- limb darkening q1
                                 UP(0, 1, 'q2_%i'%ipb)])     ##  sq2 + 2*ipb -- limb darkening q2
 
-        # Rotator angle baseline
-        # ----------------------
-        self._srp = len(self.priors)
-        self.priors.append(UP(-0.5 * pi, pi, 'brp'))  ##  srp -- Rotator angle phase
 
         ## Baseline
         ## --------
@@ -120,7 +117,6 @@ class LPFSD(LPF):
             self.priors.append(UP( 0.0, 2.0, 'bcn_%i'%ilc))  #  sbl + ilc -- Baseline constant
             self.priors.append(UP(-1.0, 1.0, 'btl_%i'%ilc))  #  sbl + ilc -- Linear time trend
             self.priors.append(UP(-1.0, 1.0, 'bal_%i'%ilc))  #  sbl + ilc -- Linear airmass trend
-            self.priors.append(UP( 0.0, 0.5, 'bra_%i'%ilc))  #  sbl + ilc -- Rotaror angle amplitude
 
         ## White noise
         ## -----------
@@ -167,14 +163,11 @@ class LPFSD(LPF):
         self.uq1 = np.unique(self.iq1)
         self.uq2 = np.unique(self.iq2)
 
-        if hasattr(self, '_srp'):
-            self.ibrp = [self._srp]
 
         sbl = sbl if sbl is not None else self._sbl
-        self.ibcn = [sbl + 4 * ilc     for ilc in range(self.nlc)]
-        self.ibtl = [sbl + 4 * ilc + 1 for ilc in range(self.nlc)]
-        self.ibal = [sbl + 4 * ilc + 2 for ilc in range(self.nlc)]
-        self.ibra = [sbl + 4 * ilc + 3 for ilc in range(self.nlc)]
+        self.ibcn = [sbl + 3 * ilc     for ilc in range(self.nlc)]
+        self.ibtl = [sbl + 3 * ilc + 1 for ilc in range(self.nlc)]
+        self.ibal = [sbl + 3 * ilc + 2 for ilc in range(self.nlc)]
 
         swn = swn if swn is not None else self._swn
         self.iwn = [swn+ilc for ilc in range(self.nlc)]
@@ -185,7 +178,8 @@ class LPFSD(LPF):
 
 
     def lnposterior(self, pv):
-        return super().lnposterior(pv)
+        _k = sqrt(pv[self.ik2]).mean()
+        return super().lnposterior(pv) + self.prior_kw.log(_k)
 
         
     def compute_transit(self, pv):
@@ -198,7 +192,7 @@ class LPFSD(LPF):
         self._wrk_ld[:,0] = a*b
         self._wrk_ld[:,1] = a*(1.-b)
 
-        z = of.z_circular(self.times[0], pv[0], pv[1], _a, _i, self.nt) 
+        z = of.z_circular(self.times, pv[0], pv[1], _a, _i, self.nt)
         f = self.tm(z, _k, self._wrk_ld)
         return (kf*(f-1.)+1.).T
         
@@ -206,20 +200,14 @@ class LPFSD(LPF):
     def compute_lc_model(self, pv, copy=False):
         bl = self.compute_baseline(pv)
         tr = self.compute_transit(pv)
-        self._wrk_lc[:] = bl*tr
+        self._wrk_lc[:] = bl*tr/tr.mean(0)
         return self._wrk_lc if not copy else self._wrk_lc.copy()
 
 
     def compute_baseline(self, pv):
-        ra_term_1 = np.cos(pv[self.ibrp][:,newaxis] + self.rotang)
-        ra_term_1 = pv[self.ibra][:,newaxis] * (ra_term_1 - ra_term_1.mean()) / ra_term_1.ptp()
-
         bl = ( pv[self.ibcn][:,newaxis]
-             + pv[self.ibtl][:,newaxis] * self.ctimes[0]
-             + pv[self.ibal][:,newaxis] * self.airmass
-             + ra_term_1 )
-
-        bl = pv[self.ibcn][:,newaxis] + pv[self.ibtl][:,newaxis] * self.ctimes[0] + pv[self.ibal][:,newaxis] * self.airmass
+             + pv[self.ibtl][:,newaxis] * self.ctimes
+             + pv[self.ibal][:,newaxis] * self.airmass)
         return bl
 
 
@@ -229,30 +217,14 @@ class LPFSD(LPF):
 
 
     def fit_baseline(self, pvpop):
-        def baseline(pv):
-            ra_term = np.cos(pv[4] + self.rotang)
-            ra_term = pv[3] * (ra_term - ra_term.mean()) / ra_term.ptp()
-            return pv[0] + pv[1] * self.ctimes[0] + pv[2] * self.airmass + ra_term
-
-        def minfun(pv):
-            if not (0. <= pv[4] <= pi) and (pv[3] > 0.):
-                return inf
-            return ((self.fluxes[i][m] - baseline(pv)[m])**2).sum()
-
+        from numpy.linalg import lstsq
         pvt = pvpop.copy()
-        pvb = zeros([self.nlc, 5])
+        X = array([ones(self.npt), self.ctimes, self.airmass])
         for i in range(self.nlc):
-            m = ~self.otmasks[i]
-            pvb[i, :] = fmin(minfun, [1, 0, 0, 0.01, 0.1], disp=False, ftol=1e-9, xtol=1e-9)
-        pvm, pvs = pvb.mean(0), pvb.std(0)
-
-        if self.passband == 'w':
-            pvs = 0.001 * np.abs(pvb.mean(0))
-
-        pvt[:, self.ibcn] = normal(pvm[0], 0.001, size=[pvt.shape[0], self.npb])
-        pvt[:, self.ibtl] = normal(pvm[1], pvs[1], size=[pvt.shape[0], self.npb])
-        pvt[:, self.ibal] = normal(pvm[2], pvs[2], size=[pvt.shape[0], self.npb])
-        pvt[:, self.ibra] = np.clip(normal(pvm[3], pvs[3], size=[pvt.shape[0], self.npb]), 0, 0.5)
+            pv = lstsq(X.T, self.fluxes[i])[0]
+            pvt[:, self.ibcn[i]] = normal(pv[0], 0.001, size=pvt.shape[0])
+            pvt[:, self.ibtl[i]] = normal(pv[1], 0.01 * abs(pv[1]), size=pvt.shape[0])
+            pvt[:, self.ibal[i]] = normal(pv[2], 0.01 * abs(pv[2]), size=pvt.shape[0])
         return pvt
 
 

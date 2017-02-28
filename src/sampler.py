@@ -1,7 +1,12 @@
 from time import time
 from tqdm import tqdm
+from numpy.random import normal
 
 from .core import *
+from src.lpfsd import LPFSD
+from src.lpfsr import LPFSR
+from src.lpfmr import LPFMR
+from src.lpfmd import LPFMD
 from .w80plots import *
 
 from matplotlib.backends.backend_pdf import PdfPages
@@ -17,13 +22,11 @@ def print_tr(str):
 update = lambda i,interval: (i+1)%interval == 0
 
 class Sampler(object):
-    def __init__(self, result_file, run_name, lpf, lnp, npop, pool=None, notebook=True, **kwargs):
-        self.result_file = result_file
+    def __init__(self, run_name, defile, mcfile, lpf, lnp, npop, pool=None, notebook=True, **kwargs):
         self.run_name = run_name
+        self.defile = defile
+        self.mcfile = mcfile
         self.npop = npop
-        self.de_path = '{:s}/de'.format(run_name)
-        self.fc_path = '{:s}/fc'.format(run_name)
-        self.mc_path = '{:s}/mc'.format(run_name)
         self.lpf = lpf
 
         periodic = []
@@ -67,8 +70,10 @@ class Sampler(object):
         if population is not None:
             self.de._population[:] = population
         else:
-            if '_dw_' in self.run_name:
+            if isinstance(self.lpf, (LPFSD, LPFSR)):
+                print('yayayaya')
                 self.de._population[:] = self.lpf.fit_baseline(self.de.population)
+                self.de._population[:,self.lpf.ik2] = normal(0.1707, 3.2e-4, (self.npop, self.lpf.npb))**2
             if self.lpf.use_ldtk:
                 self.de._population[:] = self.lpf.fit_ldc(self.de.population, emul=2.)
 
@@ -120,7 +125,7 @@ class Sampler(object):
         self.info('Saving the DE population')
         table_meta = dict(npop=self.npop, ndim=self.lpf.ps.ndim, extname='DE')
         table = Table(self.de.population, names=self.lpf.ps.names, meta=table_meta)
-        table.write(self.result_file+'_de.fits', format='fits', overwrite=True)
+        table.write(self.defile, format='fits', overwrite=True)
 
         
     def save_mc(self):
@@ -128,7 +133,7 @@ class Sampler(object):
         ns = self.sampler.iterations // self.mc_thin
         table_meta = dict(npop=self.npop, ndim=self.lpf.ps.ndim, thin=self.mc_thin, extname='MCMC')
         table = Table(self.sampler.chain[:,:ns,:].reshape([-1, self.lpf.ps.ndim]), names=self.lpf.ps.names, meta=table_meta)
-        table.write(self.result_file+'_mc.fits', format='fits', overwrite=True)
+        table.write(self.mcfile, format='fits', overwrite=True)
     
 
     def plot_status(self):

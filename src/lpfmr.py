@@ -10,12 +10,12 @@ from numpy.random import normal
 from .core import *
 from .lpf import *
 from .extcore import *
-from .lpf_multirun_direct import LPFMD
+from .lpfmd import LPFMD
 
 class LPFMR(LPFMD):
-    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, mask_ingress=False, noise='white', pipeline='hp'):
+    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, noise='white', pipeline='hp'):
         assert passband in ['bb','nb','K','Na']
-        super().__init__(passband, lctype, use_ldtk, n_threads, mask_ingress, noise, pipeline)
+        super().__init__(passband, lctype, use_ldtk, n_threads, noise, pipeline)
 
         self.fluxes = [f/fm for f,fm in zip(self.fluxes, self.fluxes_m)]
         self.priors = self.priors[:self._srp]
@@ -66,7 +66,7 @@ class LPFMR(LPFMD):
 
     def lnposterior(self, pv):
         _k = sqrt(pv[self.ik2]).mean()
-        return super(LPFC,self).lnposterior(pv) + self.prior_kw.log(_k)                
+        return super().lnposterior(pv) + self.prior_kw.log(_k)
 
 
     def compute_lc_model(self,pv):

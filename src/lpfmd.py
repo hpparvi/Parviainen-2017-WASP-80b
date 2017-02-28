@@ -13,7 +13,7 @@ from .extcore import *
 from math import pi
 
 class LPFMD(LPF):
-    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, mask_ingress=False, noise='white', pipeline='hp'):
+    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, noise='white', pipeline='hp'):
         assert passband in ['w','bb','nb','K','Na']
         assert lctype in ['target', 'relative']
         assert noise in ['white', 'red']
@@ -71,8 +71,6 @@ class LPFMD(LPF):
                 mask &= abs(f-MF(f,11)) < lim
             if (lctype == 'relative') and (j == 0):
                 mask &= (times[0] < 855.528) | (times[0] > 855.546)
-            if mask_ingress:
-                mask[:180] = False
             self.masks.append(mask)
             
         times   = [times[i][masks[i//npb]]  for i in range(2*npb)]
@@ -164,7 +162,7 @@ class LPFMD(LPF):
         if self.noise == 'red':
             self.setup_gp()
 
-        self.prior_kw = NP(0.1707, 3.2e-4, 'kw', lims=(0.16,0.18))
+        self.prior_kw = NP(0.1707, 3.2e-4, 'kw', lims=(0.16,0.195))
         
         ## Limb darkening with LDTk
         ## ------------------------
@@ -256,7 +254,7 @@ class LPFMD(LPF):
 
 
     def lnposterior(self, pv):
-        return super(LPFC, self).lnposterior(pv)
+        return super().lnposterior(pv)
 
 
     def lnlikelihood_wn(self, pv):
