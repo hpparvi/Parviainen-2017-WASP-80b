@@ -13,27 +13,47 @@ from .extcore import *
 from .lpfmd import LPFMD
 
 class LPFMR(LPFMD):
-    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, noise='white', pipeline='hp'):
-        assert passband in ['bb','nb','K','Na']
+    """ Ln posterior function implementing the divide-by-white model.
+    """
+    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, noise='white', pipeline='gc'):
+        assert passband in ['bb','nb','K','Na','pr']
         super().__init__(passband, lctype, use_ldtk, n_threads, noise, pipeline)
 
+        # DATA
+        # ====
         self.fluxes = [f/fm for f,fm in zip(self.fluxes, self.fluxes_m)]
+
+        # PRIORS
+        # ======
         self.priors = self.priors[:self._srp]
         del(self._srp)
 
-        ## Baseline
-        ## --------
+        # Orbital parameter priors
+        # ------------------------
+        # We'll constrain the orbital parameters to the estimates obtained from the direct-model runs.
+        # This is necessary since our DW approach doesn't constrain the orbital parameters well.
+        #
+        self.priors[0] = NP(125.405120,  1e-5,   'tc')  #  0  - Transit centre
+        self.priors[1] = NP(3.06790389,  1e-6,    'p')  #  1  - Period
+        self.priors[2] = NP(4.26962691,  1e-2,  'rho')  #  2  - Stellar density
+        self.priors[3] = NP(0.13018502,  1e-2,    'b')  #  3  - Impact parameter
+
+        # Baseline priors
+        # ---------------
+        # We'll use a linear model a + b * time + c * airmass to model the baseline, and assume that rest of
+        # the systematics are wavelength-independent and removed by the DW approach.
+        #
         self._sbl = len(self.priors)
         for ilc in range(self.nlc):
-            self.priors.append(UP( 0.0, 2.0, 'bcn_%i'%ilc)) ##  sbl + ilc -- Baseline constant
-            self.priors.append(UP(-1.0, 1.0, 'btl_%i'%ilc)) ##  sbl + ilc -- Linear time trend
-            self.priors.append(UP(-1.0, 1.0, 'bal_%i'%ilc)) ##  sbl + ilc -- Linear airmass trend
+            self.priors.append(UP( 0.0, 2.0, 'bcn_%i'%ilc)) #  sbl + ilc -- Baseline constant
+            self.priors.append(UP(-1.0, 1.0, 'btl_%i'%ilc)) #  sbl + ilc -- Linear time trend
+            self.priors.append(UP(-1.0, 1.0, 'bal_%i'%ilc)) #  sbl + ilc -- Linear airmass trend
 
-        ## White noise
-        ## -----------
+        # White noise
+        # -----------
+        # As with the direct-model, the average white noise is treated as a free parameter.
         self._swn = len(self.priors)
-        self.priors.extend([UP(3e-4, 4e-3, 'e_%i'%ilc) 
-                            for ilc in range(self.nlc)]) ##  sqn + ilc -- Average white noise
+        self.priors.extend([UP(3e-4, 4e-3, 'e_%i'%ilc) for ilc in range(self.nlc)])
 
         self.ps = PriorSet(self.priors)
         self.set_pv_indices()
@@ -65,7 +85,7 @@ class LPFMR(LPFMD):
 
 
     def lnposterior(self, pv):
-        _k = sqrt(pv[self.ik2]).mean()
+        _k = median(sqrt(pv[self.ik2]))
         return super().lnposterior(pv) + self.prior_kw.log(_k)
 
 
@@ -84,15 +104,12 @@ class LPFMR(LPFMD):
 
 
     def fit_baseline(self, pvpop):
-        def baseline(pv, ilc):
-            return pv[0] + pv[1]*self.ctimes[ilc] + pv[2]*self.airmass[ilc] 
-
+        from numpy.linalg import lstsq
         pvt = pvpop.copy()
         for i in range(self.nlc):
-            m = ~self.otmasks[i]
-            pv0 = fmin(lambda pv: ((self.fluxes[i][m]-baseline(pv,i)[m])**2).sum(), 
-                       [1,0,0], disp=False, ftol=1e-9, xtol=1e-9)
-            pvt[:,self.ibcn[i]] = normal(pv0[0], 0.001,            size=pvt.shape[0])
-            pvt[:,self.ibtl[i]] = normal(pv0[1], 0.01*abs(pv0[1]), size=pvt.shape[0])
-            pvt[:,self.ibal[i]] = normal(pv0[2], 0.01*abs(pv0[2]), size=pvt.shape[0])
+            X = array([ones_like(self.ctimes[i]), self.ctimes[i], self.airmass[i]])
+            pv = lstsq(X.T, self.fluxes[i])[0]
+            pvt[:, self.ibcn[i]] = normal(pv[0], 0.001, size=pvt.shape[0])
+            pvt[:, self.ibtl[i]] = normal(pv[1], 0.01 * abs(pv[1]), size=pvt.shape[0])
+            pvt[:, self.ibal[i]] = normal(pv[2], 0.01 * abs(pv[2]), size=pvt.shape[0])
         return pvt

@@ -11,7 +11,7 @@ from .extcore import *
 
 class LPFSR(LPF):
     def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, night=2, mask_ingress=False, noise='white', pipeline='gc'):
-        assert passband in ['w', 'bb', 'nb', 'K', 'Na']
+        assert passband in ['bb', 'nb', 'K', 'Na','pr']
         assert lctype in ['target', 'relative']
         assert noise in ['white', 'red']
         assert pipeline in ['hp', 'gc']
@@ -38,7 +38,10 @@ class LPFSR(LPF):
         elif passband == 'Na':
             cols = [c for c in df.columns if lctype+'_Na'  in c]
             self.filters = pb_filters_na
-
+        elif passband == 'pr':
+            cols = [c for c in df.columns if lctype+'_pr'  in c]
+            self.filters = pb_filters_pr
+            
         if passband == 'w':
             pbs = ['w']
             fluxes = df[cols].values.mean(1)
@@ -148,7 +151,6 @@ class LPFSR(LPF):
         ## Limb darkening with LDTk
         ## ------------------------
         if use_ldtk:
-            self.filters = pb_filters_nb
             self.sc = LDPSetCreator([4150,100], [4.6,0.2], [-0.14,0.16], self.filters)
             self.lp = self.sc.create_profiles(2000)
             self.lp.resample_linear_z()
@@ -178,7 +180,7 @@ class LPFSR(LPF):
 
 
     def lnposterior(self, pv):
-        _k = sqrt(pv[self.ik2]).mean()
+        _k = median(sqrt(pv[self.ik2]))
         return super().lnposterior(pv) + self.prior_kw.log(_k)
 
         

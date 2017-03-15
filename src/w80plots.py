@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as pl
 import seaborn as sb
+from seaborn.palettes import get_color_cycle
 from numpy import asarray, zeros
 from .core import *
 
@@ -84,7 +85,7 @@ def plot_light_curves(lpf, pv, pbc, yoffset=0.019, **kwargs):
     ylim    = kwargs.get('ylim', (0.955,1.175))
     title   = kwargs.get('title', '')
 
-    cc = sb.get_color_cycle()
+    cc = get_color_cycle()
     fms = lpf.compute_lc_model(pv)
     fms[0][:,141] = np.nan
     fos = lpf.fluxes

@@ -5,14 +5,17 @@ from numpy import *
 
 from scipy.signal import medfilt as MF
 from numpy.random import normal, uniform
+from statsmodels.robust import mad
 
 from .core import *
 from .lpf import *
 from .extcore import *
 
+from george.kernels import CosineKernel
+
 from math import pi
 
-class LPFMD(LPF):
+class LPFMD5(LPF):
     def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, noise='white', pipeline='hp'):
         assert passband in ['w','bb','nb','K','Na', 'pr']
         assert lctype in ['target', 'relative']
@@ -58,7 +61,7 @@ class LPFMD(LPF):
 
         npb = len(pbs)
 
-        times  = npb*[df1.bjd.values-TZERO]+npb*[df2.bjd.values-TZERO]
+        times  = df1.bjd.values-TZERO, df2.bjd.values-TZERO
         fluxes = [f/nanmedian(f) for f in fluxes]
 
         self.otimes = times
@@ -76,14 +79,14 @@ class LPFMD(LPF):
                 mask &= (times[0] < 855.528) | (times[0] > 855.546)
             self.masks.append(mask)
             
-        times   = [times[i][masks[i//npb]]  for i in range(2*npb)]
+        times   = times[0][masks[0]], times[1][masks[1]]
         fluxes  = [fluxes[i][masks[i//npb]] for i in range(2*npb)]
 
         fc = pd.read_hdf(RFILE_EXT, 'vkrn_ldtk/fc')
         self.otmasks = [abs(fold(t, fc.p.mean(), fc.tc.mean(), 0.5)-0.5) < 0.0134 for t in times]
-        self.rotang  = npb*[np.deg2rad(df1.rotang[masks[0]].values)]  + npb*[np.deg2rad(df2.rotang[masks[1]].values)]
-        self.elevat  = npb*[df1.elevat[masks[0]].values]  + npb*[df2.elevat[masks[1]].values]
-        self.airmass = npb*[df1.airmass[masks[0]].values] + npb*[df2.airmass[masks[1]].values]
+        self.rotang  = np.deg2rad(df1.rotang[masks[0]].values), np.deg2rad(df2.rotang[masks[1]].values)
+        self.elevat  = df1.elevat[masks[0]].values, df2.elevat[masks[1]].values
+        self.airmass = df1.airmass[masks[0]].values, df2.airmass[masks[1]].values
         self.ctimes  = [t-t.mean() for t in times]
         
         self.airmass_means = [a.mean() for a in self.airmass]
@@ -125,26 +128,14 @@ class LPFMD(LPF):
             self.priors.extend([UP(0, 1, 'q1_%i'%ipb),      ##  sq1 + 2*ipb -- limb darkening q1
                                 UP(0, 1, 'q2_%i'%ipb)])     ##  sq2 + 2*ipb -- limb darkening q2
 
-        ## Rotator angle baseline
-        ## ----------------------
-        self._srp = len(self.priors)
-        for irun in range(2):
-            self.priors.append(UP(-0.5*pi, pi, 'brp_%i'%irun)) ##  srp + irun -- Rotator angle phase
-
-        # Baseline
-        # --------
-        self._sbl = len(self.priors)
-        for ilc in range(self.nlc):
-            self.priors.append(UP( 0.0,  2.0, 'bcn_%i'%ilc)) ##  sbl + ilc -- Baseline constant
-            self.priors.append(UP(-1.0,  1.0, 'btl_%i'%ilc)) ##  sbl + ilc -- Linear time trend
-            self.priors.append(UP(-1.0,  1.0, 'bal_%i'%ilc)) ##  sbl + ilc -- Linear airmass trend
-            self.priors.append(UP( 0.0, 0.50, 'bra_%i'%ilc)) ##  sbl + ilc -- Rotaror angle amplitude
-
-        # White noise
-        # -----------
-        self._swn = len(self.priors)
-        self.priors.extend([UP(3e-4, 4e-3, 'e_%i'%ilc) 
-                            for ilc in range(self.nlc)]) ##  sqn + ilc -- Average white noise
+        # GP hyperparameters
+        # ------------------
+        self.wn_estimates = array([sqrt(2)*mad(diff(f)) for f in self.fluxes])
+        self._sgp = len(self.priors)
+        self.priors.extend([UP(-5, -1, 'log10_am_amplitude'),
+                            UP(-5,  3, 'log10_am_inv_scale'),
+                            UP(-5, -1, 'log10_ra_amplitude'),
+                            UP(-5,  3, 'log10_ra_inv_scale')])
 
         self.ps = PriorSet(self.priors)
         self.set_pv_indices()
@@ -156,19 +147,19 @@ class LPFMD(LPF):
         self.priors[1] = NP(fc.p.mean(),    20*fc.p.std(),    'p',  limsigma=15)
         self.priors[2] = NP(fc.rho.mean(),  fc.rho.std(),   'rho',  limsigma=5)
         self.priors[3] = NP(fc.b.mean(),    fc.b.std(),       'b',  lims=(0,1))
-
-        if self.noise == 'red':
-            for ilc,i in enumerate(self.iwn):
-                self.priors[i] = NP(7e-4, 2e-4, 'e_%i'%ilc, lims=(0,1))
-        
         self.ps = PriorSet(self.priors)
-        if self.noise == 'red':
-            self.setup_gp()
 
         self.prior_kw = NP(0.1707, 3.2e-4, 'kw', lims=(0.16,0.195))
-        
-        ## Limb darkening with LDTk
-        ## ------------------------
+
+        self.kernel = ( 1e-3**2 * ExpSquaredKernel(.01, ndim=2, axes=0)
+                      + 1e-3**2 * ExpSquaredKernel(.01, ndim=2, axes=1))
+        self.gps = [GP(self.kernel) for i in range(2)]
+
+        self.gp_inputs = array([self.airmass[0], self.rotang[0]]).T, array([self.airmass[1], self.rotang[1]]).T
+        [gp.compute(input, yerr=5e-4) for gp,input in zip(self.gps, self.gp_inputs)]
+
+        # Limb darkening with LDTk
+        # ------------------------
         if use_ldtk:
             self.sc = LDPSetCreator([4150,100], [4.6,0.2], [-0.14,0.16], self.filters)
             self.lp = self.sc.create_profiles(2000)
@@ -184,52 +175,33 @@ class LPFMD(LPF):
         self.uq1 = np.unique(self.iq1)
         self.uq2 = np.unique(self.iq2)
 
-        if hasattr(self, '_srp'):
-            self.ibrp = [self._srp+irun   for irun in range(2)]
-        
-        sbl = sbl if sbl is not None else self._sbl
-        self.ibcn = [sbl+4*ilc   for ilc in range(self.nlc)]
-        self.ibtl = [sbl+4*ilc+1 for ilc in range(self.nlc)]
-        self.ibal = [sbl+4*ilc+2 for ilc in range(self.nlc)]
-        self.ibra = [sbl+4*ilc+3 for ilc in range(self.nlc)]
-
-        swn = swn if swn is not None else self._swn
-        self.iwn = [swn+ilc for ilc in range(self.nlc)]
+        if hasattr(self, '_sgp'):
+            self.slgp = s_[self._sgp:self._sgp+4]
+        #self.iwn = [swn+ilc for ilc in range(self.nlc)]
 
 
     def setup_gp(self):
-        if self.passband in 'bb nb Na K'.split():
-            hps = pd.read_hdf(join(DRESULT,'gtc_gp_hyperparameters.h5'), self.passband)
-        else:
-            raise NotImplementedError()
+        raise NotImplementedError
 
-        self.gps = []
-        for ilc in range(self.nlc):
-            self.gps.append(GPTime(self.times[ilc], self.fluxes[ilc]))
-            if ilc < self.npb:
-                self.gps[-1].compute(hps.night1.values[ilc])
-            else:
-                self.gps[-1].compute(hps.night2.values[ilc-self.npb])
-
-        
     def compute_transit(self, pv):
-        _a  = as_from_rhop(pv[2], pv[1]) 
-        _i  = mt.acos(pv[3]/_a) 
+        _a = as_from_rhop(pv[2], pv[1])
+        _i = mt.acos(pv[3] / _a)
         _k = sqrt(pv[self.ik2]).mean()
-        kf = pv[self.ik2]/_k**2
+        kf = pv[self.ik2] / _k ** 2
 
-        a,b = sqrt(pv[self.iq1]), 2.*pv[self.iq2]
-        self._wrk_ld[:,0] = a*b
-        self._wrk_ld[:,1] = a*(1.-b)
+        a, b = sqrt(pv[self.iq1]), 2. * pv[self.iq2]
+        self._wrk_ld[:, 0] = a * b
+        self._wrk_ld[:, 1] = a * (1. - b)
 
-        z1 = of.z_circular(self.times[0], pv[0], pv[1], _a, _i, self.nt) 
-        z2 = of.z_circular(self.times[self.npb], pv[0], pv[1], _a, _i, self.nt) 
+        z1 = of.z_circular(self.times[0], pv[0], pv[1], _a, _i, self.nt)
+        z2 = of.z_circular(self.times[1], pv[0], pv[1], _a, _i, self.nt)
 
         f1 = self.tm(z1, _k, self._wrk_ld[:self.npb])
         f2 = self.tm(z2, _k, self._wrk_ld[self.npb:])
 
-        return (kf[self.npb:]*(f1-1.)+1.).T, (kf[:self.npb]*(f2-1.)+1.).T
-        
+        return (kf[self.npb:] * (f1 - 1.) + 1.).T, (kf[:self.npb] * (f2 - 1.) + 1.).T
+
+
 
     def compute_lc_model(self,pv):
         bl1,bl2 = self.compute_baseline(pv)
@@ -238,22 +210,19 @@ class LPFMD(LPF):
         self._wrk_lc[1][:] = bl2*tr2
         return self._wrk_lc
 
-            
-    def compute_baseline(self, pv):
-        ra_term_1 = np.cos(pv[self.ibrp[:1]][:,newaxis] + self.rotang[0])
-        ra_term_2 = np.cos(pv[self.ibrp[1:]][:,newaxis] + self.rotang[self.npb])
-        ra_term_1 = pv[self.ibra[:self.npb]][:,newaxis] * (ra_term_1 - ra_term_1.mean()) / ra_term_1.ptp()
-        ra_term_2 = pv[self.ibra[self.npb:]][:,newaxis] * (ra_term_2 - ra_term_2.mean()) / ra_term_2.ptp()
 
-        bl1 = ( pv[self.ibcn[:self.npb]][:,newaxis]
-              + pv[self.ibtl[:self.npb]][:,newaxis] * self.ctimes[0]
-              + pv[self.ibal[:self.npb]][:,newaxis] * self.airmass[0]
-              + ra_term_1 )
-        bl2 = ( pv[self.ibcn[self.npb:]][:,newaxis]
-              + pv[self.ibtl[self.npb:]][:,newaxis] * self.ctimes[self.npb]
-              + pv[self.ibal[self.npb:]][:,newaxis] * self.airmass[self.npb]
-              + ra_term_2 )
-        return bl1, bl2
+    def map_to_gp(self, pv):
+        log10_to_ln = 1./log10(e)
+        gpp = zeros(4)
+        gpp[0] =  2 * pv[0] * log10_to_ln
+        gpp[1] =     -pv[1] * log10_to_ln
+        gpp[2] =  2 * pv[2] * log10_to_ln
+        gpp[3] =     -pv[3] * log10_to_ln
+        return gpp
+
+
+    def compute_baseline(self, pv):
+        return 1., 1.
 
 
     def lnposterior(self, pv):
@@ -261,9 +230,17 @@ class LPFMD(LPF):
 
 
     def lnlikelihood_wn(self, pv):
+        gpps = self.map_to_gp(pv[self.slgp])
+        self.kernel[:] = gpps
+        [gp.compute(inp, yerr=self.wn_estimates.mean()) for inp,gp in zip(self.gp_inputs, self.gps)]
+
+        fmodel = self.compute_lc_model(pv)
+
         lnlike = 0.
-        for iwn, fo, fm in zip(self.iwn, self.fluxes, chain(*self.compute_lc_model(pv))):
-            lnlike += ll_normal_es(fo, fm, pv[iwn])
+        for fo, fm in zip(self.fluxes[:self.npb], fmodel[0]):
+            lnlike += self.gps[0].lnlikelihood(fo-fm)
+        for fo, fm in zip(self.fluxes[self.npb:], fmodel[1]):
+            lnlike += self.gps[1].lnlikelihood(fo-fm)
         return lnlike
 
     

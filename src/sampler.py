@@ -41,7 +41,7 @@ class Sampler(object):
         self.mc_isave   = kwargs.get('mc_isave',   100)
         self.mc_nruns   = kwargs.get('mc_nruns',     1) 
         self.mc_thin    = kwargs.get('mc_thin',    100)
-                
+
         if not notebook:
             self.logger  = logging.getLogger()
             logfile = open('{:s}.log'.format(run_name.replace('/','_')), mode='w')
@@ -70,10 +70,10 @@ class Sampler(object):
         if population is not None:
             self.de._population[:] = population
         else:
-            if isinstance(self.lpf, (LPFSD, LPFSR)):
-                print('yayayaya')
+            self.de._population[:, np.unique(self.lpf.ik2)] = normal(0.1707, 0.001, (self.npop, self.lpf.npb)) ** 2
+            if isinstance(self.lpf, (LPFSD, LPFSR, LPFMR)):
                 self.de._population[:] = self.lpf.fit_baseline(self.de.population)
-                self.de._population[:,self.lpf.ik2] = normal(0.1707, 3.2e-4, (self.npop, self.lpf.npb))**2
+                self.de._population[:, np.unique(self.lpf.ik2)] = normal(0.1707, 3.2e-4, (self.npop, self.lpf.npb))**2
             if self.lpf.use_ldtk:
                 self.de._population[:] = self.lpf.fit_ldc(self.de.population, emul=2.)
 
