@@ -152,8 +152,8 @@ class LPFMD(LPF):
         # Update the priors using the external data modelling
         # ---------------------------------------------------
         fc = pd.read_hdf(RFILE_EXT, 'vkrn_ldtk/fc')
-        self.priors[0] = NP(fc.tc.mean(),   20*fc.tc.std(),  'tc',  limsigma=15)
-        self.priors[1] = NP(fc.p.mean(),    20*fc.p.std(),    'p',  limsigma=15)
+        self.priors[0] = NP(fc.tc.mean(),   fc.tc.std(),  'tc',  limsigma=15)
+        self.priors[1] = NP(fc.p.mean(),    fc.p.std(),    'p',  limsigma=15)
         self.priors[2] = NP(fc.rho.mean(),  fc.rho.std(),   'rho',  limsigma=5)
         self.priors[3] = NP(fc.b.mean(),    fc.b.std(),       'b',  lims=(0,1))
 

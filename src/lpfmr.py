@@ -30,13 +30,13 @@ class LPFMR(LPFMD):
 
         # Orbital parameter priors
         # ------------------------
-        # We'll constrain the orbital parameters to the estimates obtained from the direct-model runs.
+        # We'll constrain the orbital parameters to the estimates obtained from the GP-model runs.
         # This is necessary since our DW approach doesn't constrain the orbital parameters well.
         #
-        self.priors[0] = NP(125.405120,  1e-5,   'tc')  #  0  - Transit centre
-        self.priors[1] = NP(3.06790389,  1e-6,    'p')  #  1  - Period
-        self.priors[2] = NP(4.26962691,  1e-2,  'rho')  #  2  - Stellar density
-        self.priors[3] = NP(0.13018502,  1e-2,    'b')  #  3  - Impact parameter
+        self.priors[0] = NP(125.417392,  8e-5,   'tc')  #  0  - Transit centre
+        self.priors[1] = NP(3.06785541,  4e-7,    'p')  #  1  - Period
+        self.priors[2] = NP(4.17300000,  3e-2,  'rho')  #  2  - Stellar density
+        self.priors[3] = NP(0.15200000,  2e-2,    'b')  #  3  - Impact parameter
 
         # Baseline priors
         # ---------------

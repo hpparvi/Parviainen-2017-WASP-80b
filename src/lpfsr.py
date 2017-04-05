@@ -13,7 +13,7 @@ class LPFSR(LPF):
     def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, night=2, mask_ingress=False, noise='white', pipeline='gc'):
         assert passband in ['bb', 'nb', 'K', 'Na','pr']
         assert lctype in ['target', 'relative']
-        assert noise in ['white', 'red']
+        assert noise in ['white']
         assert pipeline in ['hp', 'gc']
         assert night in [1,2]
 
@@ -112,7 +112,6 @@ class LPFSR(LPF):
             self.priors.extend([UP(0, 1, 'q1_%i'%ipb),      ##  sq1 + 2*ipb -- limb darkening q1
                                 UP(0, 1, 'q2_%i'%ipb)])     ##  sq2 + 2*ipb -- limb darkening q2
 
-
         ## Baseline
         ## --------
         self._sbl = len(self.priors)
@@ -130,21 +129,12 @@ class LPFSR(LPF):
         self.ps = PriorSet(self.priors)
         self.set_pv_indices()
         
-        ## Update the priors using the external data modelling
-        ## ---------------------------------------------------
-        fc = pd.read_hdf(RFILE_EXT, 'vkrn_ldtk/fc')
-        self.priors[0] = NP(fc.tc.mean(),   20*fc.tc.std(),  'tc',  limsigma=15)
-        self.priors[1] = NP(fc.p.mean(),    20*fc.p.std(),    'p',  limsigma=15)
-        self.priors[2] = NP(fc.rho.mean(),  fc.rho.std(),   'rho',  limsigma=5)
-        self.priors[3] = NP(fc.b.mean(),    fc.b.std(),       'b',  lims=(0,1))
-
-        if self.noise == 'red':
-            for ilc,i in enumerate(self.iwn):
-                self.priors[i] = NP(7e-4, 2e-4, 'e_%i'%ilc, lims=(0,1))
-
-        self.ps = PriorSet(self.priors)
-        if self.noise == 'red':
-            self.setup_gp()
+        # Update the priors using the external data modelling
+        # ---------------------------------------------------
+        self.priors[0] = NP(125.417392,  8e-5,   'tc')  #  0  - Transit centre
+        self.priors[1] = NP(3.06785541,  4e-7,    'p')  #  1  - Period
+        self.priors[2] = NP(4.17300000,  3e-2,  'rho')  #  2  - Stellar density
+        self.priors[3] = NP(0.15200000,  2e-2,    'b')  #  3  - Impact parameter
 
         self.prior_kw = NP(0.1707, 3.2e-4, 'kw', lims=(0.16,0.18))
         
@@ -164,7 +154,6 @@ class LPFSR(LPF):
         self.iq2 = [self._sq2+pbid*2 for pbid in self.gpbids]
         self.uq1 = np.unique(self.iq1)
         self.uq2 = np.unique(self.iq2)
-
 
         sbl = sbl if sbl is not None else self._sbl
         self.ibcn = [sbl + 3 * ilc     for ilc in range(self.nlc)]
