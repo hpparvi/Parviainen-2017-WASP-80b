@@ -13,10 +13,6 @@ from src.lpfsd import LPFSD
 from src.lpfsr import LPFSR
 from src.lpfmr import LPFMR
 from src.lpfmd import LPFMD
-from src.lpfmd2 import LPFMD2
-from src.lpfmd3 import LPFMD3
-from src.lpfmd4 import LPFMD4
-from src.lpfmd5 import LPFMD5
 
 if __name__ == '__main__':
     ap = ArgumentParser()
@@ -24,7 +20,7 @@ if __name__ == '__main__':
     ap.add_argument('--passband', type=str, choices=['w', 'bb', 'nb', 'K', 'Na', 'pr'])
     ap.add_argument('--pipeline', type=str, choices=['hp', 'gc'])
     ap.add_argument('--nights', type=int, choices=[1, 2, 12])
-    ap.add_argument('--approach', type=str, choices=['dw','abs','absc','abss','abst','absgp'], default='dw')
+    ap.add_argument('--approach', type=str, choices=['dw','abs'], default='dw')
     ap.add_argument('--lc-type', type=str, choices=['target','relative'], default='target')
     ap.add_argument('--noise', type=str, choices=['white', 'red'])
     ap.add_argument('--mask-ingress', action='store_true', default=False)
@@ -67,30 +63,6 @@ if __name__ == '__main__':
         else:
             lpf = LPFSD(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
                         n_threads=args.n_threads, night=args.nights, pipeline=args.pipeline)
-    elif args.approach == 'absc':
-        if args.nights == 12:
-            lpf = LPFMD2(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
-                        n_threads=args.n_threads,  pipeline=args.pipeline)
-        else:
-            raise NotImplementedError
-    elif args.approach == 'abss':
-        if args.nights == 12:
-            lpf = LPFMD3(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
-                        n_threads=args.n_threads,  pipeline=args.pipeline)
-        else:
-            raise NotImplementedError
-    elif args.approach == 'abst':
-        if args.nights == 12:
-            lpf = LPFMD4(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
-                         n_threads=args.n_threads, pipeline=args.pipeline)
-        else:
-            raise NotImplementedError
-    elif args.approach == 'absgp':
-        if args.nights == 12:
-            lpf = LPFMD5(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
-                         n_threads=args.n_threads, pipeline=args.pipeline)
-        else:
-            raise NotImplementedError
     elif args.approach == 'dw':
         if args.nights == 12:
             lpf = LPFMR(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
@@ -126,52 +98,6 @@ if __name__ == '__main__':
     if de_exists:
         pop = Table.read(de_file).to_pandas().values
         sampler.info('Continuing DE from a previous run')
-
-    # The direct models always require a corresponding white-light analysis to be ran
-    # before any narrow-band ranalyses. The white-light results are used to initialize
-    # the baseline.
-    elif type(lpf) in (LPFMD, LPFMD2, LPFMD3, LPFMD4) and args.passband != 'w':
-        white_file = fname_template.format(approach=args.approach, pb='w', nights=str(args.nights),
-                                           lctype=args.lc_type, noise=args.noise,
-                                           ldtk='ldtk' if args.use_ldtk else 'noldtk')
-        white_file = join(resdir, white_file+'_mc.fits')
-
-        if not exists(white_file):
-            sampler.error('White LC error doesn\'t exist')
-            exit()
-
-        fc = Table.read(white_file).to_pandas().values
-        pop = lpf.ps.generate_pv_population(args.n_walkers)
-
-        hw = lpf.nlc // 2
-        npop = pop.shape[0]
-        ndim = pop.shape[1]
-        pop[:, :4] = fc[-npop:, :4]
-        pop[:, unique(lpf.ik2)]  = fc[-npop:, tile(4, lpf.npb)]
-        pop[:, unique(lpf.iq1)]  = fc[-npop:, tile(5, lpf.npb)]
-        pop[:, unique(lpf.iq2)]  = fc[-npop:, tile(6, lpf.npb)]
-        if args.nights == 12:
-            pop[:, lpf.ibrp] = fc[-npop:, [7, 8]]
-            pop[:, lpf.ibcn[:hw]] = fc[-npop:, tile( 9, hw)]
-            pop[:, lpf.ibcn[hw:]] = fc[-npop:, tile(13, hw)]
-            pop[:, lpf.ibtl[:hw]] = fc[-npop:, tile(10, hw)]
-            pop[:, lpf.ibtl[hw:]] = fc[-npop:, tile(14, hw)]
-            pop[:, lpf.ibal[:hw]] = fc[-npop:, tile(11, hw)]
-            pop[:, lpf.ibal[hw:]] = fc[-npop:, tile(15, hw)]
-            pop[:, lpf.ibra[:hw]] = fc[-npop:, tile(12, hw)]
-            pop[:, lpf.ibra[hw:]] = fc[-npop:, tile(16, hw)]
-            if isinstance(lpf, LPFMD2):
-                pop[:,-1:] = fc[-npop:, -1:]
-            if isinstance(lpf, LPFMD3):
-                pop[:,-2:] = fc[-npop:, -2:]
-        else:
-            hw = lpf.nlc
-            pop[:, lpf.ibrp] = fc[-npop:, [7]]
-            pop[:, lpf.ibcn] = fc[-npop:, tile(8, hw)]
-            pop[:, lpf.ibtl] = fc[-npop:, tile(9, hw)]
-            pop[:, lpf.ibal] = fc[-npop:, tile(10, hw)]
-            pop[:, lpf.ibra] = fc[-npop:, tile(11, hw)]
-
     else:
         pop = None
         sampler.info('Couldnt find DE results, forcing a DE run')
