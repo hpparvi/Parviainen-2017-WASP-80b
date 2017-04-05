@@ -12,6 +12,7 @@ from .lpf import *
 from .extcore import *
 
 from george.kernels import CosineKernel
+from george.solvers import HODLRSolver
 
 from math import pi
 
@@ -143,9 +144,9 @@ class LPFMD5(LPF):
         # Update the priors using the external data modelling
         # ---------------------------------------------------
         fc = pd.read_hdf(RFILE_EXT, 'vkrn_ldtk/fc')
-        self.priors[0] = NP(fc.tc.mean(),   20*fc.tc.std(),  'tc',  limsigma=15)
-        self.priors[1] = NP(fc.p.mean(),    20*fc.p.std(),    'p',  limsigma=15)
-        self.priors[2] = NP(fc.rho.mean(),  fc.rho.std(),   'rho',  limsigma=5)
+        self.priors[0] = NP(fc.tc.mean(),   fc.tc.std(),     'tc',  limsigma=25)
+        self.priors[1] = NP(fc.p.mean(),    fc.p.std(),       'p',  limsigma=25)
+        self.priors[2] = NP(fc.rho.mean(),  fc.rho.std(),   'rho',  limsigma=10)
         self.priors[3] = NP(fc.b.mean(),    fc.b.std(),       'b',  lims=(0,1))
         self.ps = PriorSet(self.priors)
 
@@ -153,7 +154,7 @@ class LPFMD5(LPF):
 
         self.kernel = ( 1e-3**2 * ExpSquaredKernel(.01, ndim=2, axes=0)
                       + 1e-3**2 * ExpSquaredKernel(.01, ndim=2, axes=1))
-        self.gps = [GP(self.kernel) for i in range(2)]
+        self.gps = [GP(self.kernel, solver=HODLRSolver) for i in range(2)]
 
         self.gp_inputs = array([self.airmass[0], self.rotang[0]]).T, array([self.airmass[1], self.rotang[1]]).T
         [gp.compute(input, yerr=5e-4) for gp,input in zip(self.gps, self.gp_inputs)]
