@@ -73,7 +73,6 @@ class Sampler(object):
             self.de._population[:, np.unique(self.lpf.ik2)] = normal(0.1707, 0.001, (self.npop, self.lpf.npb)) ** 2
             if isinstance(self.lpf, (LPFSD, LPFSR, LPFMR)):
                 self.de._population[:] = self.lpf.fit_baseline(self.de.population)
-                self.de._population[:, np.unique(self.lpf.ik2)] = normal(0.1707, 3.2e-4, (self.npop, self.lpf.npb))**2
             if self.lpf.use_ldtk:
                 self.de._population[:] = self.lpf.fit_ldc(self.de.population, emul=2.)
 
