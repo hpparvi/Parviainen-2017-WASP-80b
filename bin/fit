@@ -58,10 +58,10 @@ if __name__ == '__main__':
 
     if args.approach == 'abs':
         if args.nights == 12:
-            lpf = LPFMD(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
+            lpf = LPFMD(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk,
                         n_threads=args.n_threads,  pipeline=args.pipeline)
         else:
-            lpf = LPFSD(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk, noise=args.noise,
+            lpf = LPFSD(args.passband, lctype=args.lc_type, use_ldtk=args.use_ldtk,
                         n_threads=args.n_threads, night=args.nights, pipeline=args.pipeline)
     elif args.approach == 'dw':
         if args.nights == 12:
