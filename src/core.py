@@ -11,6 +11,7 @@ import numpy as  np
 import seaborn as sb
 import matplotlib.pyplot as pl
 
+from collections import namedtuple
 from glob import glob
 from os.path import join, exists, basename, abspath, relpath
 from numpy.polynomial.chebyshev import Chebyshev
@@ -26,7 +27,7 @@ from scipy.ndimage import median_filter as MF
 from scipy.ndimage import gaussian_filter1d as gf
 from scipy.ndimage import label, binary_erosion
 
-from numpy import pi, array, exp, abs, sum, zeros_like, arange, concatenate, argsort, s_, tile, unique
+from numpy import pi, array, exp, abs, sum, zeros_like, arange, concatenate, argsort, s_, tile, unique, median
 from scipy.constants import k, G, proton_mass
 from scipy.optimize import fmin_powell, fmin
 
@@ -229,6 +230,19 @@ c_passbands = ('w g r i z J H K'.split()
                + [f.name for f in pb_filters_k]
                + [f.name for f in pb_filters_na]
                + [f.name for f in pb_filters_pr])
+
+
+def load_mcmc_run(filename):
+    dtuple = namedtuple('data', 'tb df ch fc pv npop ndim'.split())
+    tb = Table.read(filename)
+    npop = tb.meta['NPOP']
+    ndim = tb.meta['NDIM']
+    df = tb.to_pandas()
+    ch = df.values.reshape([npop, -1, ndim])
+    fc = ch.reshape([-1,ndim])
+    pv = median(fc, 0)
+    return dtuple(tb, df, ch, fc, pv, npop, ndim)
+
 
 def ccd_slice(run, width=50):
     df = pd.read_hdf('data/aux.h5',('jul16' if run==0 else 'aug25'))

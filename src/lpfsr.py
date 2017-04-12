@@ -4,100 +4,33 @@ from numpy import *
 
 from scipy.signal import medfilt as MF
 from numpy.random import normal
+from statsmodels.robust import mad
 
 from .core import *
 from .lpf import *
 from .extcore import *
+from .lpfsd import LPFSD
+from george.kernels import ConstantKernel, Matern32Kernel
 
-class LPFSR(LPF):
-    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, night=2, mask_ingress=False, noise='white', pipeline='gc'):
-        assert passband in ['bb', 'nb', 'K', 'Na','pr']
-        assert lctype in ['target', 'relative']
-        assert noise in ['white']
-        assert pipeline in ['hp', 'gc']
-        assert night in [1,2]
+class LPFSR(LPFSD):
+    def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, night=2, pipeline='gc'):
+        super().__init__(passband, lctype, use_ldtk, n_threads, night, pipeline)
 
-        if pipeline == 'hp':
-            self.df = df = pd.merge(pd.read_hdf(join(DDATA, 'aux.h5'), 'night%i'%night),
-                                      pd.read_hdf(join(DRESULT, 'gtc_light_curves.h5'), 'night%i'%night),
-                                      left_index=True, right_index=True)
-        else:
-            self.df = df = pd.read_hdf(join(DRESULT,'gtc_light_curves_gc.h5'), 'night%i'%night)
-
-        self.night = night
-        self.passband = passband        
-        if passband == 'bb':
-            cols = ['{:s}_{:s}'.format(lctype, pb) for pb in 'g r i z'.split()]
-            self.filters = pb_filters_bb
-        elif passband in ['w', 'nb']:
-            cols = [c for c in self.df.columns if lctype+'_nb' in c]
-            self.filters = pb_filters_nb
-        elif passband == 'K':
-            cols = [c for c in df.columns if lctype+'_K'  in c]
-            self.filters = pb_filters_k
-        elif passband == 'Na':
-            cols = [c for c in df.columns if lctype+'_Na'  in c]
-            self.filters = pb_filters_na
-        elif passband == 'pr':
-            cols = [c for c in df.columns if lctype+'_pr'  in c]
-            self.filters = pb_filters_pr
-            
-        if passband == 'w':
-            pbs = ['w']
-            fluxes = df[cols].values.mean(1)
-            NN = lambda a: a / a.max()
-            self.filters = [
-                TabulatedFilter('white', pb_filters_bb[0].wl, NN(array([f.tm for f in pb_filters_bb]).mean(0)))]
-        else:
-            pbs = [c.split('_')[1] for c in cols]
-            fluxes = df[cols].values.T
-
-        npb = len(pbs)
-        times  = df.bjd.values - TZERO
-        fluxes /= nanmedian(fluxes, 1)[:,newaxis]
-
-        ## Mask outliers
-        ## -------------
-        lim = 0.006
-        self.mask = ones(fluxes[0].size, np.bool)
-        for i in range(npb):
-            f = fluxes[i]
-            self.mask &= abs(f-MF(f,11)) < lim
-            if lctype == 'relative' and self.night == 1:
-                self.mask &= (times[0] < 855.528) | (times[0] > 855.546)
-
-        times   = times[self.mask]
-        fluxes  = fluxes[:,self.mask]
-
-        fc = pd.read_hdf(RFILE_EXT, 'vkrn_ldtk/fc')
-        self.otmasks = abs(fold(times, fc.p.mean(), fc.tc.mean(), 0.5)-0.5) < 0.0134
-        self.rotang  = np.radians(df.rotang[self.mask].values)
-        self.elevat  = df.elevat[self.mask].values
-        self.airmass = df.airmass[self.mask].values
-        self.ctimes  = times-times.mean()
-        
-        # Initialise the parent
-        # ---------------------
-        super().__init__(times, fluxes, pbs,
-                         use_ldtk=False, constant_k=False, noise='white',
-                         ldf_path='../data/external_lcs.h5', nthreads=n_threads)
-        self.use_ldtk = use_ldtk
-
-        self.fluxes_o = self.fluxes.copy()
+        self.fluxes = asarray(self.fluxes)
         self.fluxes_m = self.fluxes.mean(0)
         self.fluxes /= self.fluxes_m
-        self.npt = self.times.size
-        self._wrk_lc = zeros_like(self.fluxes)
+        self.wn_estimates = array([sqrt(2) * mad(diff(f)) for f in self.fluxes])
+
 
         # Setup priors
         # ------------
-        # Basic parameters
-        # ----------------
-        self.priors = [NP(    TC,   1e-2,   'tc'), ##  0  - Transit centre
-                       NP(     P,   5e-4,    'p'), ##  1  - Period
-                       UP(  3.50,   4.50,  'rho'), ##  2  - Stellar density
-                       UP(  0.00,   0.99,    'b')] ##  3  - Impact parameter
-        
+        # System parameters
+        # -----------------
+        self.priors = [NP(125.417380,  8e-5,   'tc'),  #  0  - Transit centre
+                       NP(3.06785547,  4e-7,    'p'),  #  1  - Period
+                       NP(4.17200000,  3e-2,  'rho'),  #  2  - Stellar density
+                       NP(0.16100000,  2e-2,    'b')]  #  3  - Impact parameter
+
         # Area ratio
         # ----------
         self._sk2 = len(self.priors)
@@ -115,26 +48,20 @@ class LPFSR(LPF):
         ## Baseline
         ## --------
         self._sbl = len(self.priors)
+        self._nbl = 2
         for ilc in range(self.nlc):
             self.priors.append(UP( 0.0, 2.0, 'bcn_%i'%ilc))  #  sbl + ilc -- Baseline constant
-            self.priors.append(UP(-1.0, 1.0, 'btl_%i'%ilc))  #  sbl + ilc -- Linear time trend
             self.priors.append(UP(-1.0, 1.0, 'bal_%i'%ilc))  #  sbl + ilc -- Linear airmass trend
 
-        ## White noise
-        ## -----------
-        self._swn = len(self.priors)
-        self.priors.extend([UP(3e-4, 4e-3, 'e_%i'%ilc) 
-                            for ilc in range(self.nlc)]) ##  sqn + ilc -- Average white noise
-
+        # Gaussian Process hyperparameters
+        # --------------------------------
+        self._sgp = len(self.priors)
+        self.priors.extend([UP(-5, -1, 'log10_tm_amplitude'),
+                            NP(-5,  3, 'log10_tm_inv_scale', lims=[-5, 3]),
+                            UP(-5, -1, 'log10_ra_amplitude'),
+                            NP(-5,  2, 'log10_ra_inv_scale', lims=[-5, 3])])
         self.ps = PriorSet(self.priors)
         self.set_pv_indices()
-        
-        # Update the priors using the external data modelling
-        # ---------------------------------------------------
-        self.priors[0] = NP(125.417392,  8e-5,   'tc')  #  0  - Transit centre
-        self.priors[1] = NP(3.06785541,  4e-7,    'p')  #  1  - Period
-        self.priors[2] = NP(4.17300000,  3e-2,  'rho')  #  2  - Stellar density
-        self.priors[3] = NP(0.15200000,  2e-2,    'b')  #  3  - Impact parameter
 
         self.prior_kw = NP(0.1707, 3.2e-4, 'kw', lims=(0.16,0.18))
         
@@ -144,7 +71,7 @@ class LPFSR(LPF):
             self.sc = LDPSetCreator([4150,100], [4.6,0.2], [-0.14,0.16], self.filters)
             self.lp = self.sc.create_profiles(2000)
             self.lp.resample_linear_z()
-            #self.lp.set_uncertainty_multiplier(2)
+            self.lp.set_uncertainty_multiplier(2)
             
             
     def set_pv_indices(self, sbl=None, swn=None):
@@ -156,37 +83,38 @@ class LPFSR(LPF):
         self.uq2 = np.unique(self.iq2)
 
         sbl = sbl if sbl is not None else self._sbl
-        self.ibcn = [sbl + 3 * ilc     for ilc in range(self.nlc)]
-        self.ibtl = [sbl + 3 * ilc + 1 for ilc in range(self.nlc)]
-        self.ibal = [sbl + 3 * ilc + 2 for ilc in range(self.nlc)]
+        self.ibcn = [sbl + 2 * ilc     for ilc in range(self.nlc)]
+        self.ibal = [sbl + 2 * ilc + 1 for ilc in range(self.nlc)]
 
         swn = swn if swn is not None else self._swn
         self.iwn = [swn+ilc for ilc in range(self.nlc)]
 
+        if hasattr(self, '_sgp'):
+            self.slgp = s_[self._sgp:self._sgp+4]
+
 
     def setup_gp(self):
-        pass
+        self.gp_inputs = array([self.times[0], self.rotang]).T
+        self.kernel = (ConstantKernel(1e-3**2, ndim=2, axes=0) * Matern32Kernel(.01, ndim=2, axes=0)
+                     + ConstantKernel(1e-3**2, ndim=2, axes=1) * ExpSquaredKernel(.01, ndim=2, axes=1))
+        self.gp = GP(self.kernel)
+        self.gp.compute(self.gp_inputs, yerr=5e-4)
+
+
+    def map_to_gp(self, pv):
+        log10_to_ln = 1. / log10(e)
+        gpp = zeros(4)
+        gpp[0] = 2 * pv[0] * log10_to_ln
+        gpp[1] =    -pv[1] * log10_to_ln
+        gpp[2] = 2 * pv[2] * log10_to_ln
+        gpp[3] =    -pv[3] * log10_to_ln
+        return gpp
 
 
     def lnposterior(self, pv):
         _k = median(sqrt(pv[self.ik2]))
         return super().lnposterior(pv) + self.prior_kw.log(_k)
 
-        
-    def compute_transit(self, pv):
-        _a  = as_from_rhop(pv[2], pv[1]) 
-        _i  = mt.acos(pv[3]/_a) 
-        _k = sqrt(pv[self.ik2]).mean()
-        kf = pv[self.ik2]/_k**2
-
-        a,b = sqrt(pv[self.iq1]), 2.*pv[self.iq2]
-        self._wrk_ld[:,0] = a*b
-        self._wrk_ld[:,1] = a*(1.-b)
-
-        z = of.z_circular(self.times, pv[0], pv[1], _a, _i, self.nt)
-        f = self.tm(z, _k, self._wrk_ld)
-        return (kf*(f-1.)+1.).T
-        
 
     def compute_lc_model(self, pv, copy=False):
         bl = self.compute_baseline(pv)
@@ -197,25 +125,18 @@ class LPFSR(LPF):
 
     def compute_baseline(self, pv):
         bl = ( pv[self.ibcn][:,newaxis]
-             + pv[self.ibtl][:,newaxis] * self.ctimes
              + pv[self.ibal][:,newaxis] * self.airmass)
         return bl
-
-
-    def lnlikelihood_wn(self, pv):
-        fluxes_m = self.compute_lc_model(pv)
-        return sum([ll_normal_es(fo, fm, wn) for fo,fm,wn in zip(self.fluxes, fluxes_m, pv[self.iwn])])
 
 
     def fit_baseline(self, pvpop):
         from numpy.linalg import lstsq
         pvt = pvpop.copy()
-        X = array([ones(self.npt), self.ctimes, self.airmass])
+        X = array([ones(self.npt), self.airmass])
         for i in range(self.nlc):
             pv = lstsq(X.T, self.fluxes[i])[0]
             pvt[:, self.ibcn[i]] = normal(pv[0], 0.001, size=pvt.shape[0])
-            pvt[:, self.ibtl[i]] = normal(pv[1], 0.01 * abs(pv[1]), size=pvt.shape[0])
-            pvt[:, self.ibal[i]] = normal(pv[2], 0.01 * abs(pv[2]), size=pvt.shape[0])
+            pvt[:, self.ibal[i]] = normal(pv[1], 0.01 * abs(pv[1]), size=pvt.shape[0])
         return pvt
 
 

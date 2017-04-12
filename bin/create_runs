@@ -12,7 +12,7 @@ if __name__ == '__main__':
     #!/bin/bash
     #############################
     #SBATCH -J {rname}
-    #SBATCH -p express
+    #SBATCH -p batch
     #SBATCH -N {nnodes}
     #SBATCH --tasks-per-node=16
     #SBATCH -t {whours:02d}:{wmins:02d}:00
@@ -26,23 +26,19 @@ if __name__ == '__main__':
     module load openmpi/1.10.3/gcc
 
     echo "#1 EXECUTING"
-    for i in {{1..5}}; do mpirun ../bin/fit --pipeline {pipeline} --passband {passband} --nights {nights} --approach {approach} --lc-type {lctype} --noise {noise} --n-walkers 600 --de-n-iterations 5000 --de-update-interval 100 --de-save-interval 500 --do-mc --mc-n-iterations 10000 --mc-update-interval 200 --mc-save-interval 1000 --mc-thin 200 --mc-n-runs 1 {ldtk}; done
+    for i in {{1..2}}; do mpirun ../bin/fit --pipeline {pipeline} --passband {passband} --nights {nights} --approach {approach} --lc-type {lctype} --noise {noise} --n-walkers 600 --de-n-iterations 4000 --de-update-interval 100 --de-save-interval 500 --do-mc --mc-n-iterations 10000 --mc-update-interval 200 --mc-save-interval 1000 --mc-thin 200 --mc-n-runs 1 {ldtk}; done
     """
 
     passbands = 'w', 'nb', 'K', 'Na', 'pr'
-    approaches = 'abs', 'dw'
-    noises = 'white', 'red'
+    approaches = 'abs', 'dwr'
+    nights = 1, 2, 12
+    ldtks = '', '--use-ldtk'
+    whours, wmins = 6, 0
+    nodes = 4
 
-    for approach in ['abs','absc','abss','dw']:
-        whours, wmins = 2, 0
-        for pb,noise,night in product(passbands, noises, [1,2,12]):
-            bname = '{}_{}_{}_{}'.format(pb,approach,noise,night)
+    for approach, pb, night, ldtk in product(approaches, passbands, nights, ldtks):
+        bname = '{}_{}_{}_{}'.format(pb,approach,night, 'ldtk' if ldtk != '' else 'noldtk')
+        if not (approach == 'dwr' and pb == 'w'):
             with open(join(W80ROOT, 'runs', bname), 'w') as f:
-                f.write(dedent(template.format(rname=bname, nnodes=4, pipeline='gc', passband=pb, nights=night, approach=approach, 
-                                               lctype='relative', noise=noise, ldtk='', whours=whours, wmins=wmins)).strip())
-
-        for pb,noise,night in product(passbands, noises, [1,2,12]):
-            bname = '{}_{}_{}_{}_ldtk'.format(pb,approach,noise,night)
-            with open(join(W80ROOT, 'runs', bname), 'w') as f:
-                f.write(dedent(template.format(rname=bname, nnodes=4, pipeline='gc', passband=pb, nights=night, approach=approach, 
-                                        lctype='relative', noise=noise, ldtk='--use-ldtk', whours=whours, wmins=wmins)).strip())
+                f.write(dedent(template.format(rname=bname, nnodes=nodes, pipeline='gc', passband=pb, nights=night, approach=approach,
+                                               lctype='relative', noise='white', ldtk=ldtk, whours=whours, wmins=wmins)).strip())

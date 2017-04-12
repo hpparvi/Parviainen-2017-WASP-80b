@@ -8,7 +8,7 @@ from scipy.stats import scoreatpercentile as sap
 from numpy.random import normal
 from statsmodels.robust import mad
 
-from george.kernels import ConstantKernel
+from george.kernels import ConstantKernel, Matern32Kernel
 
 from .core import *
 from .lpf import *
@@ -74,7 +74,9 @@ class LPFSD(LPF):
         self.otmasks = [abs(fold(t, fc.p.mean(), fc.tc.mean(), 0.5)-0.5) < 0.0134 for t in times]
         self.rotang  = np.radians(df.rotang[self.mask].values)
         self.airmass = df.airmass[self.mask].values
-        
+
+        self.npt = self.airmass.size
+
         # Initialise the parent
         # ---------------------
         super().__init__(times, fluxes, pbs,
@@ -110,6 +112,7 @@ class LPFSD(LPF):
         ## Baseline
         ## --------
         self._sbl = len(self.priors)
+        self._nbl = 1
         for ilc in range(self.nlc):
             self.priors.append(NP( 1.0, 0.001, 'bcn_%i'%ilc))  #  sbl + ilc -- Baseline constant
 
@@ -117,9 +120,9 @@ class LPFSD(LPF):
         # ------------------
         self._sgp = len(self.priors)
         self.priors.extend([UP(-5, -1, 'log10_am_amplitude'),
-                            UP(-5, 3, 'log10_am_inv_scale'),
+                            UP(-5,  3, 'log10_am_inv_scale'),
                             UP(-5, -1, 'log10_ra_amplitude'),
-                            UP(-5, 3, 'log10_ra_inv_scale')])
+                            UP(-5,  3, 'log10_ra_inv_scale')])
 
         self.ps = PriorSet(self.priors)
         self.set_pv_indices()
@@ -135,16 +138,13 @@ class LPFSD(LPF):
         self.priors[3] = NP(fc.b.mean(),    fc.b.std(),    'b',    lims=(0,1))
         self.ps = PriorSet(self.priors)
 
-        self.prior_kw = NP(0.1707, 3.2e-4, 'kw', lims=(0.16,0.18))
-        
         ## Limb darkening with LDTk
         ## ------------------------
         if use_ldtk:
-            self.filters = pb_filters_nb
             self.sc = LDPSetCreator([4150,100], [4.6,0.2], [-0.14,0.16], self.filters)
             self.lp = self.sc.create_profiles(2000)
             self.lp.resample_linear_z()
-            #self.lp.set_uncertainty_multiplier(2)
+            self.lp.set_uncertainty_multiplier(2)
             
             
     def set_pv_indices(self, sbl=None, swn=None):
@@ -166,7 +166,7 @@ class LPFSD(LPF):
         self.gp_inputs = array([self.airmass, self.rotang]).T
         self.kernel = (ConstantKernel(1e-3 ** 2, ndim=2, axes=0) * ExpSquaredKernel(.01, ndim=2, axes=0)
                      + ConstantKernel(1e-3 ** 2, ndim=2, axes=1) * ExpSquaredKernel(.01, ndim=2, axes=1))
-        self.gp = GP(self.kernel) #, solver=HODLRSolver)
+        self.gp = GP(self.kernel)
         self.gp.compute(self.gp_inputs, yerr=5e-4)
 
 
@@ -202,7 +202,7 @@ class LPFSD(LPF):
     def compute_lc_model(self, pv, copy=False):
         bl = self.compute_baseline(pv)
         tr = self.compute_transit(pv)
-        self._wrk_lc[:] = bl*tr
+        self._wrk_lc[:] = bl[:,np.newaxis]*tr
         return self._wrk_lc if not copy else self._wrk_lc.copy()
 
 
