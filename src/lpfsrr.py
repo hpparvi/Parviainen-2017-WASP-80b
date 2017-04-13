@@ -35,12 +35,10 @@ class LPFSRR(LPFSD):
 
         # Change the GP priors slightly
         # -----------------------------
-        self.priors.extend([UP(-5, -1, 'log10_tm_amplitude'),
-                            UP(-5,  5, 'log10_tm_inv_scale'),
-                            UP(-5, -1, 'log10_am_amplitude'),
+        self.priors.extend([UP(-5, -1, 'log10_am_amplitude'),
                             UP(-5,  2, 'log10_am_inv_scale'),
                             UP(-5, -1, 'log10_ra_amplitude'),
-                            UP(-5,  2, 'log10_ra_inv_scale')])
+                            UP(-5,  3, 'log10_ra_inv_scale')])
         self.ps = PriorSet(self.priors)
 
         self.prior_kw = NP(0.1707, 3.2e-4, 'kw', lims=(0.16,0.18))
@@ -58,27 +56,24 @@ class LPFSRR(LPFSD):
         self.ibcn = [sbl + ilc for ilc in range(self.nlc)]
 
         if hasattr(self, '_sgp'):
-            self.slgp = s_[self._sgp:self._sgp + 6]
+            self.slgp = s_[self._sgp:self._sgp + 4]
 
 
     def setup_gp(self):
-        self.gp_inputs = array([self.times[0], self.airmass, self.rotang]).T
-        self.kernel = (ConstantKernel(1e-3 ** 2, ndim=3, axes=0) * Matern32Kernel(.01, ndim=3, axes=0)
-                     + ConstantKernel(1e-3 ** 2, ndim=3, axes=1) * ExpSquaredKernel(.01, ndim=3, axes=1)
-                     + ConstantKernel(1e-3 ** 2, ndim=3, axes=2) * ExpSquaredKernel(.01, ndim=3, axes=2))
+        self.gp_inputs = array([self.airmass, self.rotang]).T
+        self.kernel = (ConstantKernel(1e-3 ** 2, ndim=2, axes=0) * ExpSquaredKernel(.01, ndim=2, axes=0)
+                     + ConstantKernel(1e-3 ** 2, ndim=2, axes=1) * ExpSquaredKernel(.01, ndim=2, axes=1))
         self.gp = GP(self.kernel)
         self.gp.compute(self.gp_inputs, yerr=5e-4)
 
 
     def map_to_gp(self, pv):
         log10_to_ln = 1. / log10(e)
-        gpp = zeros(6)
+        gpp = zeros(4)
         gpp[0] = 2 * pv[0] * log10_to_ln
         gpp[1] =    -pv[1] * log10_to_ln
         gpp[2] = 2 * pv[2] * log10_to_ln
         gpp[3] =    -pv[3] * log10_to_ln
-        gpp[4] = 2 * pv[4] * log10_to_ln
-        gpp[5] =    -pv[5] * log10_to_ln
         return gpp
 
 

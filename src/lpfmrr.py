@@ -13,9 +13,9 @@ class LPFMRR(CLPF):
         self.lpf2 = l2 = LPFSRR(passband, lctype, use_ldtk=False, pipeline=pipeline, night=2, n_threads=n_threads)
         super().__init__((l1,l2), constant_k=False, noise='red', use_ldtk=False)
         l1._sgp = l2._sgp = self.ps.ndim
-        l1.slgp = l2.slgp = s_[l1._sgp:l1._sgp+6]
+        l1.slgp = l2.slgp = s_[l1._sgp:l1._sgp+4]
         self.priors[:7] = l1.priors[:7]
-        self.priors.extend(l1.priors[-6:])
+        self.priors.extend(l1.priors[-4:])
         self.ps = PriorSet(self.priors)
 
         self.filters = l1.filters
