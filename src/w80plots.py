@@ -1,8 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as pl
 import seaborn as sb
+
+from scipy.stats import norm
 from seaborn.palettes import get_color_cycle
-from numpy import asarray, zeros
+from numpy import asarray, zeros, linspace, diff, sqrt
 from .core import *
 
 def wavelength_to_rgb(wavelength, gamma=0.8):
@@ -113,85 +115,184 @@ def plot_light_curves(lpf, pv, pbc, yoffset=0.019, **kwargs):
     return fig
 
 
-def plot_radius_ratios(df, lpf, df2=None, axk=None, plot_spectrum=True, plot_kprior=True, **kwargs):
-    if axk is None:
-        fig, axk = pl.subplots(1,1)
-    axh = axk.twinx()
 
-    xlims = dict(bb = (450,950), nb = (515,925), Na = (560,620), K = (735,797))
-    pbcs  = dict(bb = pb_centers_bb, nb = pb_centers_nb, K = pb_centers_k, Na = pb_centers_na)
-    spss  = dict(bb = 0.0015, nb=0.0015, Na=0.001, K=0.001)
-    spls  = dict(bb = 0.1, nb=0.1, Na=0.25, K=0.25)
+def plot_radius_ratios(df, lpf, axk=None, plot_spectrum=True, plot_kprior=True, nsh=6, **kwargs):
+    fig = pl.figure(figsize=kwargs.get('figsize', None))
+
+    if plot_kprior:
+        gs = pl.GridSpec(1, 2, width_ratios=[0.9, 0.1])
+        axk = fig.add_subplot(gs[0])
+        axp = fig.add_subplot(gs[1])
+    else:
+        axk = fig.add_subplot(111)
+
+    axh = axk.twinx()
+    pb = lpf.passband if lpf.passband != 'nb_mock' else 'nb'
+
+    wl = linspace(450, 950, 2000)
+    pb_bounds = array([wl[f(wl) > 0.9][[0, -1]] for f in lpf.filters])
+    pb_widths = diff(pb_bounds)
+
+    shskip = kwargs.get('shskip', 2)
+
+    xlims = dict(bb=(450, 950), nb=(513, 920), Na=(560, 620), K=(735, 797))
+    pbcs = dict(bb=pb_centers_bb, nb=pb_centers_nb, K=pb_centers_k, Na=pb_centers_na)
+    spss = dict(bb=0.0015, nb=0.0015, Na=0.001, K=0.001)
+    spls = dict(bb=0.1, nb=0.1, Na=0.25, K=0.25)
+    pals = dict(bb=pal_bb, nb=pal_nb, Na=pal_na, K=pal_k)
 
     k2cols = [c for c in df.columns if 'k2' in c]
     pes_k = np.asarray(np.percentile(np.sqrt(df[k2cols]), [50, 0.5, 99.5, 16, 84], 0))
     yc = pes_k[0].mean()
 
     yspan = kwargs.get('yspan', 0.008)
-    ylim = np.asarray(kwargs.get('ylim', np.array([yc-0.5*yspan, yc+0.5*yspan])))
-    xlim = np.asarray(kwargs.get('xlim', xlims[lpf.passband]))
+    ylim = np.asarray(kwargs.get('ylim', np.array([yc - 0.5 * yspan, yc + 0.5 * yspan])))
+    xlim = np.asarray(kwargs.get('xlim', xlims[pb]))
 
-    spc_scale = kwargs.get('spc_scale', spss[lpf.passband])
-    spc_loc = kwargs.get('spc_loc', yc+spls[lpf.passband]*yspan)
+    spc_scale = kwargs.get('spc_scale', spss[pb])
+    spc_loc = kwargs.get('spc_loc', yc + spls[pb] * yspan)
 
     fs = kwargs.get('fs', 14)
     lyoffset = kwargs.get('lyoffset', 2e-4)
     lxoffset = kwargs.get('lxoffset', 10)
     plot_h = kwargs.get('plot_h', False)
 
-    plot_k  = kwargs.get('plot_k',  lpf.passband in ['K','bb','nb'])
-    plot_na = kwargs.get('plot_na', lpf.passband in ['Na','bb','nb'])
+    plot_k = kwargs.get('plot_k', pb in ['K', 'bb', 'nb'])
+    plot_na = kwargs.get('plot_na', pb in ['Na', 'bb', 'nb'])
+
+    scaleheight = H(TEQ)
+    pbc = pbcs[pb]
+
+    kmean, kstd = sqrt(df[k2cols].values).mean(), sqrt(df[k2cols].values).std()
+
+    if plot_spectrum:
+        d = np.load(join(DRESULT, 'gtc_spectra_n2.npz'))
+        sp = d['ccd2'].mean(0)
+        wl = d['wl2']
+
+        spn = spc_scale * N(sp)
+        spf = [flt(wl) * spn for flt in lpf.filters]
+        spf = [np.where(f > 1e-4, f + spc_loc, f) for f in spf]
+
+        axk.plot(wl, spc_loc + spn, alpha=0.15, c=c_bo)
+        [axk.fill(wl, f, alpha=0.15, lw=1, fc='w', ec=c_ob) for f in spf]
+
+    if plot_kprior:
+        kmean, kstd = lpf.prior_kw.mean, lpf.prior_kw.std
+        karr = linspace(0.16, 0.18, 200)
+        axp.plot(norm.pdf(karr, kmean, kstd), karr, lw=1)
+
+    if plot_na:
+        [axk.axvline(l, c='k', lw=1, ls='-', ymax=0.1, zorder=10) for l in wlc_na]
+        axk.text(wlc_na.mean() + lxoffset, ylim[0] + lyoffset, 'Na I', size=fs, weight='bold', ha='center',
+                 bbox=dict(facecolor='w', edgecolor='w'), zorder=9)
+
+    if plot_k:
+        [axk.axvline(l, c='k', lw=1, ls='-', ymax=0.1, zorder=10) for l in wlc_k]
+        axk.text(wlc_k.mean() + lxoffset, ylim[0] + lyoffset, 'K I', size=fs, weight='bold', ha='center',
+                 bbox=dict(facecolor='w', edgecolor='w'), zorder=9)
+
+    pals['Na'] = sb.color_palette(wavelength_to_rgb(array(pb_centers_na) * 0.82 - 30))
+    pal_a = pals[pb]
+    pal_b = [sb.desaturate(c, 0.5) for c in pal_a]
+
+    axk.bar(pb_bounds.mean(1), bottom=pes_k[1], height=pes_k[2] - pes_k[1],
+            color=pal_a, edgecolor='k', width=0.8 * pb_widths, alpha=0.25, lw=1)
+    axk.bar(pb_bounds.mean(1), bottom=pes_k[3], height=pes_k[4] - pes_k[3],
+            color=pal_b, edgecolor='0.5', width=0.8 * pb_widths, alpha=0.5, lw=1)
+
+    pl.setp(axk, xlim=xlim, ylim=ylim, ylabel='$\Delta$ Scale height', xlabel='Wavelength [nm]',
+            yticks=kmean + scaleheight * arange(-nsh, nsh+1, shskip) / RSTAR, yticklabels=arange(-nsh, nsh+1, shskip))
+    pl.setp(axh, xlim=xlim, ylim=ylim, ylabel='Radius ratio')
+
+    if plot_kprior:
+        pl.setp(axp, ylim=ylim, xlim=(0, 1.2 * norm.pdf(0, 0, kstd)), xticks=[], yticks=[])
+        sb.despine(ax=axp, bottom=True)
+
+    sb.despine(ax=axk, left=False, offset=5)
+    sb.despine(ax=axh, left=True, right=False, bottom=True, offset=5)
+    axk.tick_params(direction='in', length=4, width=1)
+    axh.tick_params(direction='in', length=4, width=1)
+    fig.tight_layout()
+    return fig, axk
+
+
+def plot_k_comparison(df1, df2, lpf, axk=None, nsh=6, style='normal', clip=None, **kwargs):
+    if not axk:
+        fig, axk = pl.subplots(1, 1, figsize=kwargs.get('figsize', None))
+    axh = axk.twinx()
+
+    ylim = kwargs.get('ylim', (0.165, 0.175))
+    pbcs = dict(bb=pb_centers_bb, nb=pb_centers_nb, K=pb_centers_k, Na=pb_centers_na)
+    pals = dict(bb=pal_bb, nb=pal_nb, Na=pal_na, K=pal_k)
+
+    k2cols = [c for c in df1.columns if 'k2' in c]
+    kcols = [c for c in df1.columns if 'k_' in c]
 
     scaleheight = H(TEQ)
     pbc = pbcs[lpf.passband]
 
-    if df2 is not None:
-        pes_k2 = np.asarray(np.percentile(np.sqrt(df2[k2cols]), [50, 0.5, 99.5, 16, 84], 0))
-    
-    if plot_spectrum:
-        d  = np.load(join(DRESULT, 'gtc_spectra_n2.npz'))
-        sp = d['ccd2'].mean(0)
-        wl = d['wl2']
+    kmean, kstd = sqrt(df1[k2cols].values).mean(), sqrt(df1[k2cols].values).std()
 
-        spn = spc_scale*N(sp)
-        spf = [flt(wl)*spn for flt in lpf.filters]
-        spf = [np.where(f>1e-4, f+spc_loc, f) for f in spf]
-    
-        axk.plot(wl, spc_loc+spn, alpha=0.2, c=c_bo)
-        [axk.fill(wl, f, alpha=1, lw=1, fc='w', ec=c_ob) for f in spf]
-                  
-    if plot_kprior:
-        kmean, kstd = lpf.prior_kw.mean, lpf.prior_kw.std
-        axk.axhline(kmean, c=c_ob)
-        [axk.axhspan(kmean-i*kstd, kmean+i*kstd, alpha=0.15-0.02*i, fc=c_bo) for i in range(1,4)]
-          
-    if plot_na:
-        [axk.axvline(l, c='k', lw=3, ls='-', ymax=0.1, zorder=10) for l in wlc_na]
-        axk.text(wlc_na.mean()+lxoffset, ylim[0]+lyoffset, 'Na I', size=fs, weight='bold', ha='center', 
-                bbox=dict(facecolor='w', edgecolor='w'), zorder=9)
+    pals['Na'] = sb.color_palette(wavelength_to_rgb(array(pb_centers_na) * 0.82 - 30))
+    pal = pals[lpf.passband]
 
-    if plot_k:
-        [axk.axvline(l, c='k', lw=3, ls='-', ymax=0.1, zorder=10) for l in wlc_k]
-        axk.text(wlc_k.mean()+lxoffset, ylim[0]+lyoffset, 'K I', size=fs, weight='bold', ha='center',
-               bbox=dict(facecolor='w', edgecolor='w'), zorder=9)
+    if style == 'violin':
+        k1 = sqrt(df1[k2cols])
+        k2 = sqrt(df2[k2cols])
 
-    if df2 is None:
-        axk.errorbar(pbc, pes_k[0], yerr=abs(pes_k[1:3]-pes_k[0]).mean(0), fmt=',', capsize=0, capthick=0, c=c_ob, lw=4, alpha=0.1)
-        axk.errorbar(pbc, pes_k[0], yerr=abs(pes_k[3:5]-pes_k[0]).mean(0), fmt='o', capsize=2, capthick=1, c=c_ob)
+        relative = False
+        c = 'Night'
+        v1 = 1
+        v2 = 2
+
+        if relative:
+            k1 /= k1.values.mean()
+            k2 /= k2.values.mean()
+
+        k1.columns = array(pb_centers_nb, dtype=np.int)
+        k2.columns = array(pb_centers_nb, dtype=np.int)
+
+        dfa = pd.melt(k1)
+        dfb = pd.melt(k2)
+        dfa[c] = v1
+        dfb[c] = v2
+
+        sb.set_palette(cp)
+        dfc = pd.concat([dfa, dfb])
+        dfc.columns = 'Wavelength, Radius ratio, {}'.format(c).split(', ')
+        sb.violinplot(data=dfc, x='Wavelength', y='Radius ratio', hue=c, inner=None,
+                      split=True, bw=0.2, ax=axk, cut=0, saturation=0.75)
     else:
-        pbc = np.asarray(pbc)
-        axk.errorbar(pbc-2.5, pes_k[0],  yerr=abs(pes_k[1:3]-pes_k[0]).mean(0), fmt=',', capsize=0, capthick=0, c=c_ob, lw=4, alpha=0.1)
-        axk.errorbar(pbc-2.5, pes_k[0],  yerr=abs(pes_k[3:5]-pes_k[0]).mean(0), fmt='o', capsize=2, capthick=1, c=c_ob)
-        axk.plot(pbc-2.5, pes_k[0], 'D', ms=2, mfc='r', mec=c_ob, mew=0.5)
-        axk.errorbar(pbc+2.5, pes_k2[0], yerr=abs(pes_k2[1:3]-pes_k2[0]).mean(0), fmt=',', capsize=0, capthick=0, c=c_ob, lw=4, alpha=0.1)
-        axk.errorbar(pbc+2.5, pes_k2[0], yerr=abs(pes_k2[3:5]-pes_k2[0]).mean(0), fmt='o', capsize=2, capthick=1, c=c_ob)
-        axk.plot(pbc+2.5, pes_k2[0], 'o', ms=2, mfc=c_bo, mec=c_ob, mew=0.5)
-  
-    #[axh.axhline(v, alpha=0.1, zorder=-100) for v in arange(-6,7,4)]
+        if not clip:
+            ks = np.linspace(*ylim, num=100)
+        for i, kc in enumerate(kcols):
+            if clip:
+                kmean1, kstd1 = df1[kc].mean(), df1[kc].std()
+                kmean2, kstd2 = df2[kc].mean(), df2[kc].std()
+                kstart = min(kmean1-clip*kstd1, kmean2-clip*kstd2)
+                kend   = max(kmean1 + clip * kstd1, kmean2 + clip * kstd2)
+                ks = np.linspace(kstart, kend, 100)
+            for df,s in zip((df1,df2), (-1, 1)):
+                pdf = norm.pdf(ks, df[kc].mean(), df[kc].std())
+                pdf /= 2.5 * pdf.max()
+                axk.fill_betweenx(ks, i + s*pdf, i, facecolor=pal[i],
+                                  alpha=0.5 if s==-1 else 0.25, linewidth=0)
+                axk.plot(i + s*pdf, ks, c='k', lw=1, alpha=0.5)
 
-    pl.setp(axk, xlim=xlim, ylim=ylim, ylabel='Radius ratio', xlabel='Wavelength [nm]')
-    pl.setp(axh, xlim=xlim, ylim=(ylim-yc)*RSTAR/scaleheight, ylabel='$\Delta$ Scale height', yticks=arange(-6,7,2))
-    return axk, axh
+    pl.setp(axk, ylim=ylim, xticks=arange(len(pbc)), xticklabels=pbc,
+            ylabel='$\Delta$ Scale height', xlabel='Wavelength [nm]',
+            yticks=kmean + scaleheight * arange(-nsh, nsh + 1, 2) / RSTAR,
+            yticklabels=arange(-nsh, nsh + 1, 2))
+    pl.setp(axh, ylim=axk.get_ylim(), ylabel='Radius ratio')
+
+
+    sb.despine(ax=axk, left=False, offset=5)
+    sb.despine(ax=axh, left=True, right=False, bottom=True, offset=5)
+    axk.tick_params(direction='in', length=4, width=1)
+    axh.tick_params(direction='in', length=4, width=1)
+    fig.tight_layout()
+    return fig, axk
 
 pal_na = sb.color_palette(wavelength_to_rgb(pb_centers_na))
 pal_k  = sb.color_palette(wavelength_to_rgb(np.array(pb_centers_k)-150))

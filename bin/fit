@@ -19,7 +19,7 @@ from src.lpfmrr import LPFMRR
 if __name__ == '__main__':
     ap = ArgumentParser()
     ap.add_argument('--use-ldtk', action='store_true', default=False)
-    ap.add_argument('--passband', type=str, choices=['w', 'bb', 'nb', 'K', 'Na', 'pr'])
+    ap.add_argument('--passband', type=str, choices=['w', 'bb', 'nb', 'K', 'Na', 'pr', 'nb_mock'])
     ap.add_argument('--pipeline', type=str, choices=['hp', 'gc'])
     ap.add_argument('--nights', type=int, choices=[1, 2, 12])
     ap.add_argument('--approach', type=str, choices=['dw','abs','dwr'], default='dw')

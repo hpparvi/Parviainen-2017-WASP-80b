@@ -30,7 +30,7 @@ if __name__ == '__main__':
     """
 
     passbands = 'w', 'nb', 'K', 'Na', 'pr'
-    approaches = 'abs', 'dwr'
+    approaches = 'abs', 'dwr', 'dw'
     nights = 1, 2, 12
     ldtks = '', '--use-ldtk'
     whours, wmins = 6, 0

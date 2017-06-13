@@ -3,7 +3,7 @@ from copy import copy
 from numpy import *
 
 from scipy.signal import medfilt as MF
-from numpy.random import normal
+from numpy.random import normal, seed
 from statsmodels.robust import mad
 
 from .core import *
@@ -15,11 +15,15 @@ from george.kernels import ConstantKernel, Matern32Kernel
 class LPFSR(LPFSD):
     def __init__(self, passband, lctype='target', use_ldtk=False, n_threads=1, night=2, pipeline='gc'):
         super().__init__(passband, lctype, use_ldtk, n_threads, night, pipeline)
+        self.lnlikelihood = self.lnlikelihood_wn
+        self.noise = 'white'
 
         self.fluxes = asarray(self.fluxes)
         self.fluxes_m = self.fluxes.mean(0)
         self.fluxes /= self.fluxes_m
         self.wn_estimates = array([sqrt(2) * mad(diff(f)) for f in self.fluxes])
+        self.times = self.times[0]
+        self.ctimes  = self.times-self.times.mean()
 
 
         # Setup priors
@@ -48,18 +52,18 @@ class LPFSR(LPFSD):
         ## Baseline
         ## --------
         self._sbl = len(self.priors)
-        self._nbl = 2
+        self._nbl = 3
         for ilc in range(self.nlc):
             self.priors.append(UP( 0.0, 2.0, 'bcn_%i'%ilc))  #  sbl + ilc -- Baseline constant
+            self.priors.append(UP(-1.0, 1.0, 'btl_%i'%ilc))  #  sbl + ilc -- Linear time trend
             self.priors.append(UP(-1.0, 1.0, 'bal_%i'%ilc))  #  sbl + ilc -- Linear airmass trend
 
-        # Gaussian Process hyperparameters
-        # --------------------------------
-        self._sgp = len(self.priors)
-        self.priors.extend([UP(-5, -1, 'log10_tm_amplitude'),
-                            NP(-5,  3, 'log10_tm_inv_scale', lims=[-5, 3]),
-                            UP(-5, -1, 'log10_ra_amplitude'),
-                            NP(-5,  2, 'log10_ra_inv_scale', lims=[-5, 3])])
+        ## White noise
+        ## -----------
+        self._swn = len(self.priors)
+        self.priors.extend([UP(3e-4, 4e-3, 'e_%i'%ilc)
+                            for ilc in range(self.nlc)]) ##  sqn + ilc -- Average white noise
+
         self.ps = PriorSet(self.priors)
         self.set_pv_indices()
 
@@ -73,7 +77,12 @@ class LPFSR(LPFSD):
             self.lp.resample_linear_z()
             self.lp.set_uncertainty_multiplier(2)
             
-            
+        # Use mock data
+        # -------------
+        if passband == 'nb_mock' and type(self) == LPFSR:
+            self.create_mock_nb_dataset()
+
+
     def set_pv_indices(self, sbl=None, swn=None):
         self.ik2 = [self._sk2+pbid for pbid in self.gpbids]
                         
@@ -83,37 +92,39 @@ class LPFSR(LPFSD):
         self.uq2 = np.unique(self.iq2)
 
         sbl = sbl if sbl is not None else self._sbl
-        self.ibcn = [sbl + 2 * ilc     for ilc in range(self.nlc)]
-        self.ibal = [sbl + 2 * ilc + 1 for ilc in range(self.nlc)]
+        self.ibcn = [sbl + 3 * ilc     for ilc in range(self.nlc)]
+        self.ibtl = [sbl + 3 * ilc + 1 for ilc in range(self.nlc)]
+        self.ibal = [sbl + 3 * ilc + 2 for ilc in range(self.nlc)]
 
         swn = swn if swn is not None else self._swn
         self.iwn = [swn+ilc for ilc in range(self.nlc)]
 
-        if hasattr(self, '_sgp'):
-            self.slgp = s_[self._sgp:self._sgp+4]
-
 
     def setup_gp(self):
-        self.gp_inputs = array([self.times[0], self.rotang]).T
-        self.kernel = (ConstantKernel(1e-3**2, ndim=2, axes=0) * Matern32Kernel(.01, ndim=2, axes=0)
-                     + ConstantKernel(1e-3**2, ndim=2, axes=1) * ExpSquaredKernel(.01, ndim=2, axes=1))
-        self.gp = GP(self.kernel)
-        self.gp.compute(self.gp_inputs, yerr=5e-4)
-
+        pass
 
     def map_to_gp(self, pv):
-        log10_to_ln = 1. / log10(e)
-        gpp = zeros(4)
-        gpp[0] = 2 * pv[0] * log10_to_ln
-        gpp[1] =    -pv[1] * log10_to_ln
-        gpp[2] = 2 * pv[2] * log10_to_ln
-        gpp[3] =    -pv[3] * log10_to_ln
-        return gpp
+        raise NotImplementedError
 
 
     def lnposterior(self, pv):
         _k = median(sqrt(pv[self.ik2]))
         return super().lnposterior(pv) + self.prior_kw.log(_k)
+
+
+    def compute_transit(self, pv):
+        _a = as_from_rhop(pv[2], pv[1])
+        _i = mt.acos(pv[3] / _a)
+        _k = sqrt(pv[self.ik2]).mean()
+        kf = pv[self.ik2] / _k ** 2
+
+        a, b = sqrt(pv[self.iq1]), 2. * pv[self.iq2]
+        self._wrk_ld[:, 0] = a * b
+        self._wrk_ld[:, 1] = a * (1. - b)
+
+        z = of.z_circular(self.times, pv[0], pv[1], _a, _i, self.nt)
+        f = self.tm(z, _k, self._wrk_ld)
+        return (kf * (f - 1.) + 1.).T
 
 
     def compute_lc_model(self, pv, copy=False):
@@ -125,18 +136,25 @@ class LPFSR(LPFSD):
 
     def compute_baseline(self, pv):
         bl = ( pv[self.ibcn][:,newaxis]
+             + pv[self.ibtl][:,newaxis] * self.ctimes
              + pv[self.ibal][:,newaxis] * self.airmass)
         return bl
+
+
+    def lnlikelihood_wn(self, pv):
+        fluxes_m = self.compute_lc_model(pv)
+        return sum([ll_normal_es(fo, fm, wn) for fo,fm,wn in zip(self.fluxes, fluxes_m, pv[self.iwn])])
 
 
     def fit_baseline(self, pvpop):
         from numpy.linalg import lstsq
         pvt = pvpop.copy()
-        X = array([ones(self.npt), self.airmass])
+        X = array([ones(self.npt), self.ctimes, self.airmass])
         for i in range(self.nlc):
             pv = lstsq(X.T, self.fluxes[i])[0]
             pvt[:, self.ibcn[i]] = normal(pv[0], 0.001, size=pvt.shape[0])
-            pvt[:, self.ibal[i]] = normal(pv[1], 0.01 * abs(pv[1]), size=pvt.shape[0])
+            pvt[:, self.ibtl[i]] = normal(pv[1], 0.01 * abs(pv[1]), size=pvt.shape[0])
+            pvt[:, self.ibal[i]] = normal(pv[2], 0.01 * abs(pv[2]), size=pvt.shape[0])
         return pvt
 
 
@@ -149,3 +167,45 @@ class LPFSR(LPFSD):
         pvt[:, self.uq1] = q1s
         pvt[:, self.uq2] = q2s
         return pvt
+
+
+    def create_mock_nb_dataset(self):
+        tc, p, rho, b = 125.417380, 3.06785547, 4.17200000, 0.161
+
+        ks = np.full(self.npb, 0.171)
+        ks[1::3] = 0.170
+        ks[2::3] = 0.172
+        ks[[7, 13]] = 0.173
+
+        q1 = array([0.581, 0.582, 0.590, 0.567, 0.541, 0.528, 0.492, 0.490,
+                    0.461, 0.440, 0.419, 0.382, 0.380, 0.368, 0.344, 0.328,
+                    0.320, 0.308, 0.301, 0.292])
+
+        q2 = array([0.465, 0.461, 0.446, 0.442, 0.425, 0.427, 0.414, 0.409,
+                    0.422, 0.402, 0.391, 0.381, 0.379, 0.373, 0.369, 0.365,
+                    0.362, 0.360, 0.360, 0.358])
+
+        seed(0)
+        cam = normal(0, 0.03, self.nlc)
+        ctm = normal(0, 0.08, self.nlc)
+
+        seed(0)
+        pv = self.ps.generate_pv_population(1)[0]
+
+        pv[:4] = tc, p, rho, b
+        pv[self.ik2] = ks ** 2
+        pv[self.iq1] = q1
+        pv[self.iq2] = q2
+        pv[self._sbl:] = 1.
+
+        fms = self.compute_transit(pv).copy()
+
+        for i, fm in enumerate(fms):
+            fm[:] += (normal(0, self.wn_estimates[i], fm.size)
+                      + cam[i] * (self.airmass - self.airmass.mean())
+                      + ctm[i] * (self.times[0] - self.times[0].mean()))
+
+        self.fluxes = asarray(fms)
+        self.fluxes_m = self.fluxes.mean(0)
+        self.fluxes /= self.fluxes_m
+        self.wn_estimates = array([sqrt(2) * mad(diff(f)) for f in self.fluxes])

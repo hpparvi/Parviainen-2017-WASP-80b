@@ -5,7 +5,7 @@ from numpy import *
 
 from scipy.signal import medfilt as MF
 from scipy.stats import scoreatpercentile as sap
-from numpy.random import normal
+from numpy.random import normal, seed
 from statsmodels.robust import mad
 
 from george.kernels import ConstantKernel, Matern32Kernel
@@ -16,7 +16,7 @@ from .extcore import *
 
 class LPFSD(LPF):
     def __init__(self, passband, lctype='relative', use_ldtk=False, n_threads=1, night=2, pipeline='gc'):
-        assert passband in ['w', 'bb', 'nb', 'K', 'Na', 'pr']
+        assert passband in ['w', 'bb', 'nb', 'K', 'Na', 'pr', 'nb_mock']
         assert lctype in ['target', 'relative']
         assert pipeline in ['hp', 'gc']
         assert night in [1,2]
@@ -33,7 +33,7 @@ class LPFSD(LPF):
         if passband == 'bb':
             cols = ['{:s}_{:s}'.format(lctype, pb) for pb in 'g r i z'.split()]
             self.filters = pb_filters_bb
-        elif passband in ['w', 'nb']:
+        elif passband in ['w', 'nb', 'nb_mock']:
             cols = [c for c in self.df.columns if lctype+'_nb' in c]
             self.filters = pb_filters_nb
         elif passband == 'K':
@@ -145,7 +145,13 @@ class LPFSD(LPF):
             self.lp = self.sc.create_profiles(2000)
             self.lp.resample_linear_z()
             self.lp.set_uncertainty_multiplier(2)
-            
+
+
+        # Use mock data
+        # -------------
+        if passband == 'nb_mock' and type(self) == LPFSD:
+            self.create_mock_nb_dataset()
+
             
     def set_pv_indices(self, sbl=None, swn=None):
         self.ik2 = [self._sk2+pbid for pbid in self.gpbids]
@@ -235,3 +241,42 @@ class LPFSD(LPF):
         pvt[:, self.uq1] = q1s
         pvt[:, self.uq2] = q2s
         return pvt
+
+
+    def create_mock_nb_dataset(self):
+        tc, p, rho, b = 125.417380, 3.06785547, 4.17200000, 0.161
+
+        ks = np.full(self.npb, 0.171)
+        ks[1::3] = 0.168
+        ks[2::3] = 0.174
+        ks[[7, 13]] = 0.1725
+
+        q1 = array([0.581, 0.582, 0.590, 0.567, 0.541, 0.528, 0.492, 0.490,
+                    0.461, 0.440, 0.419, 0.382, 0.380, 0.368, 0.344, 0.328,
+                    0.320, 0.308, 0.301, 0.292])
+
+        q2 = array([0.465, 0.461, 0.446, 0.442, 0.425, 0.427, 0.414, 0.409,
+                    0.422, 0.402, 0.391, 0.381, 0.379, 0.373, 0.369, 0.365,
+                    0.362, 0.360, 0.360, 0.358])
+
+        seed(0)
+        cam = normal(0, 0.03, self.nlc)
+        ctm = normal(0, 0.08, self.nlc)
+
+        seed(0)
+        pv = self.ps.generate_pv_population(1)[0]
+
+        pv[:4] = tc, p, rho, b
+        pv[self.ik2] = ks ** 2
+        pv[self.iq1] = q1
+        pv[self.iq2] = q2
+        pv[self._sbl:] = 1.
+
+        fms = self.compute_transit(pv).copy()
+
+        for i, fm in enumerate(fms):
+            fm[:] += (normal(0, self.wn_estimates[i], fm.size)
+                      + cam[i] * (self.airmass - self.airmass.mean())
+                      + ctm[i] * (self.times[0] - self.times[0].mean()))
+
+        self.fluxes = fms

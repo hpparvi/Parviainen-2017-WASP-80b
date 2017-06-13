@@ -218,7 +218,7 @@ class CLPF(LogPosteriorFunction):
             lpf._sbl = self._sbl
             lpf._swn = self._swn
             lpf.set_pv_indices(sbl, swn)
-            sbl += lpf._nbl* lpf.nlc
+            sbl += lpf._nbl * lpf.nlc
             if self.noise == 'white':
                 swn += lpf.nlc
 

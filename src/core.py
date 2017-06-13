@@ -125,6 +125,7 @@ l_obj  = [sorted(glob(join(do, '*.fits')))[2:] for do in DOBJ]
 DFILE_EXT = abspath(join(W80ROOT,'data','external_lcs.h5'))
 DRESULT = join(W80ROOT, 'results')
 DDATA   = join(W80ROOT, 'data')
+DPLOT   = join(W80ROOT, 'plots')
 RFILE_EXT = abspath(join(DRESULT,'external.h5'))
 RFILE_GTC = abspath(join(DRESULT,'osiris.h5'))
 
@@ -202,7 +203,7 @@ try:
 except IOError:
     pass
         
-pb_filters_nb = [GeneralGaussian('nb{:02d}'.format(i+1), 527+20*i, 10, 15) for i in range(20)]
+pb_filters_nb = [GeneralGaussian('nb{:02d}'.format(i+1), 527+20*i, 10, 15) for i in range(21)]
 pb_filters_nb[12] = GeneralGaussian('nb13', 769.95, 5.45, 15)
 pb_filters_k  = ([GeneralGaussian('K{:02d}'.format(i+1),  740.2+6*i, 3, 15) for i in range(3)]
                  + [GeneralGaussian('K04', 760, 5, 15)]
