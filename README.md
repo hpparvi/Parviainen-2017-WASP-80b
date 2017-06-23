@@ -1,7 +1,9 @@
 # WASP-80b ground-based transmission spectroscopy
 **Hannu Parviainen, University of Oxford, 2017**
 
-These notebooks cover the broadband and transmission spectroscopy analysis of WASP-80b using three sets of previously published light curves (27 broadband LCs) and two nights of GTC-observed transmission spectroscopy. We start with a broadband analysis of the previously observed datasets to constrain the orbital parameters, and then continue with broad- and narrow band transmission spectroscopy.
+These repository contains the code, data, and notebooks that cover the broadband and transmission spectroscopy analysis of WASP-80b using three sets of previously published light curves (27 broadband LCs) and two nights of GTC-observed transmission spectroscopy. We start with a broadband analysis of the previously observed datasets to constrain the orbital parameters, and then continue with broad- and narrow band transmission spectroscopy.
+
+**NOTE: We are currently reorganising and cleaning up the code. This will hopefully not take too long, but a lot of things may be broken at the moment.**
 
 ## Introduction
 
