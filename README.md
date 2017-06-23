@@ -1,5 +1,6 @@
 # WASP-80b ground-based transmission spectroscopy
-**Hannu Parviainen, University of Oxford, 2017**
+**Hannu Parviainen, E. Palle, G. Chen, F. Murgas, L. Nortmann, G. Nowak, A. Booth, M. Abazorius, S. Aigrain**
+**Instituto de Astrofísica de Canarias & University of Oxford, 2017**
 
 These repository contains the code, data, and notebooks that cover the broadband and transmission spectroscopy analysis of WASP-80b using three sets of previously published light curves (27 broadband LCs) and two nights of GTC-observed transmission spectroscopy. We start with a broadband analysis of the previously observed datasets to constrain the orbital parameters, and then continue with broad- and narrow band transmission spectroscopy.
 
@@ -51,3 +52,7 @@ and the light curves reduced by the GC pipeline are stored in
     results/gtc_light_curves_gc.h5
     
 The h5 files contain two groups, night1 and night2, storing the photometry and the auxiliary data taken from the fits headers as Pandas dataframes.
+
+---
+
+&copy; 2017 Hannu Parviainen
