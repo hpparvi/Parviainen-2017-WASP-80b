@@ -8,7 +8,6 @@ __pycache__/
 
 *.pyc
 *.fits
-data
 *.npz
 *.h5
 *.pkl
