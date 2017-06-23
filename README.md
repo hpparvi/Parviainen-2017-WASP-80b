@@ -10,6 +10,11 @@ These repository contains the code, data, and notebooks that cover the broadband
 
 The `notebooks` directory contains the IPython notebooks going through the analyses step by step, the `src` directory contains the code for the analysis, and the `bin` directory contains executable scripts.
 
+## Requirements
+
+    Python, IPython, Jupyter, pandas, astropy, SciPy, NumPy, matplotlib, emcee, george, mpi4py, tqdm
+    PyTransit, PyExoTK, LDTk, PyDE
+
 ## 1 External broadband data
 We combine the GTC-observed data with three external multicolour datasets by Triaud et al. (2013), Mancini et al. (2014), and Fukui et al. (2014).
 
