@@ -116,15 +116,18 @@ def plot_light_curves(lpf, pv, pbc, yoffset=0.019, **kwargs):
 
 
 
-def plot_radius_ratios(df, lpf, axk=None, plot_spectrum=True, plot_kprior=True, nsh=6, **kwargs):
-    fig = pl.figure(figsize=kwargs.get('figsize', None))
-
-    if plot_kprior:
-        gs = pl.GridSpec(1, 2, width_ratios=[0.9, 0.1])
-        axk = fig.add_subplot(gs[0])
-        axp = fig.add_subplot(gs[1])
+def plot_radius_ratios(df, lpf, ax=None, plot_spectrum=True, plot_kprior=True, nsh=6, fig=None, **kwargs):
+    if ax:
+        axk = ax
     else:
-        axk = fig.add_subplot(111)
+        fig = pl.figure(figsize=kwargs.get('figsize', None))
+
+        if plot_kprior:
+            gs = pl.GridSpec(1, 2, width_ratios=[0.9, 0.1])
+            axk = fig.add_subplot(gs[0])
+            axp = fig.add_subplot(gs[1])
+        else:
+            axk = fig.add_subplot(111)
 
     axh = axk.twinx()
     pb = lpf.passband if lpf.passband != 'nb_mock' else 'nb'
@@ -213,8 +216,9 @@ def plot_radius_ratios(df, lpf, axk=None, plot_spectrum=True, plot_kprior=True, 
     sb.despine(ax=axh, left=True, right=False, bottom=True, offset=5)
     axk.tick_params(direction='in', length=4, width=1)
     axh.tick_params(direction='in', length=4, width=1)
-    fig.tight_layout()
-    return fig, axk
+    if fig:
+        fig.tight_layout()
+    return fig, axk, axh
 
 
 def plot_k_comparison(df1, df2, lpf, axk=None, nsh=6, style='normal', clip=None, **kwargs):

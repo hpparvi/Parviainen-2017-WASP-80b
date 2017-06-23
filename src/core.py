@@ -203,7 +203,7 @@ try:
 except IOError:
     pass
         
-pb_filters_nb = [GeneralGaussian('nb{:02d}'.format(i+1), 527+20*i, 10, 15) for i in range(21)]
+pb_filters_nb = [GeneralGaussian('nb{:02d}'.format(i+1), 527+20*i, 10, 15) for i in range(20)]
 pb_filters_nb[12] = GeneralGaussian('nb13', 769.95, 5.45, 15)
 pb_filters_k  = ([GeneralGaussian('K{:02d}'.format(i+1),  740.2+6*i, 3, 15) for i in range(3)]
                  + [GeneralGaussian('K04', 760, 5, 15)]
@@ -211,6 +211,9 @@ pb_filters_k  = ([GeneralGaussian('K{:02d}'.format(i+1),  740.2+6*i, 3, 15) for 
 
 pb_filters_na = [GeneralGaussian('Na{:02d}'.format(i+1), 589.4+6*(i-4), 3, 15) for i in range(9)]
 pb_filters_pr = [GeneralGaussian('pr{:02d}'.format(i+1), 779.5+i*2.5,  2.5, 15) for i in range(24)]
+
+for i,c in enumerate(pb_filters_nb[12:]):
+    c.name = 'nb{:02d}'.format(i+14)
 
 pb_centers_bb = [np.average(f.wl, weights=f(f.wl)) for f in pb_filters_bb]
 pb_centers_nb = [f.c for f in pb_filters_nb]
