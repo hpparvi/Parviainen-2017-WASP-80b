@@ -1,3 +1,8 @@
+from numpy import diff, log
+from scipy.optimize import minimize
+from tqdm import tqdm
+from george.kernels import ConstantKernel, ExpKernel, Matern32Kernel, ExpSquaredKernel
+
 from .core import *
 from .lpf import *
 
@@ -15,10 +20,8 @@ class Sampler(object):
     def optimise(self, niter=None):
         niter = niter or self.niter_de
         try:
-            for i,r in enumerate(self.de(niter)):
-                if ((i+1)%20 == 0) or (i==niter-1):
-                    clear_output(wait=True)
-                    display(HTML('DE Iteration {:4d} max lnlike {:7.1f}'.format(i+1,-self.de.minimum_value)))
+            for r in tqdm(self.de(niter), total=niter):
+                pass
         except KeyboardInterrupt:
             pass
         finally:
@@ -41,10 +44,7 @@ class Sampler(object):
             pv0 = self.sampler.chain[:,-1,:].copy()
 
         try:
-            for i,c in enumerate(self.sampler.sample(pv0, iterations=niter)):
-                if ((i+1)%10 == 0) or (i==niter-1):
-                    clear_output(wait=True)
-                    display(HTML('MCMC Iteration {:d}'.format(self.sampler.iterations)))     
+            for i,c in tqdm(enumerate(self.sampler.sample(pv0, iterations=niter)), total=niter):
                 if ((i+1)%200 == 0) or (i==niter-1):
                     save_chains()
         except KeyboardInterrupt:
@@ -98,8 +98,11 @@ class LPFExt(LPF):
         """
         Dataset should be either 'triaud2013', 'mancini2014', or 'fukui2014'.
         """
+        assert dataset in 'triaud2013 mancini2014 fukui2014'.split()
+
+        self._nbl = 1
         self.dataset = dataset
-        f = pd.HDFStore('data/external_lcs.h5','r')
+        f = pd.HDFStore(join(DDATA, 'external_lcs.h5'), 'r')
         df = pd.DataFrame([[k]+k.strip('/lc').split('/') for k in f.keys() if 'lc' in k], 
                           columns='key dataset passband name'.split())
         df = df[df.dataset == dataset]
@@ -107,7 +110,7 @@ class LPFExt(LPF):
         f.close()
         times = [s.index.values - TZERO for s in self.lcs] 
         fluxes = [s.values for s in self.lcs]   
-        super(LPFExt,self).__init__(times, fluxes, df.passband, constant_k=constant_k, 
+        super().__init__(times, fluxes, df.passband, constant_k=constant_k,
                                     noise=noise, use_ldtk=use_ldtk)
         
     def setup_gp(self):
@@ -124,7 +127,7 @@ class LPFExt(LPF):
 class LPFFukui2014(LPFExt):
     def __init__(self, use_ldtk=False, constant_k=True, noise='red'):
         self.dataset = 'fukui2014'
-        f = pd.HDFStore('data/external_lcs.h5','r')
+        f = pd.HDFStore(join(DDATA, 'external_lcs.h5'),'r')
         df = pd.DataFrame([[k]+k.strip('/lc').split('/') for k in f.keys() if 'lc' in k], 
                           columns='key dataset passband name'.split())
         df = df[df.dataset == self.dataset]
@@ -137,9 +140,8 @@ class LPFFukui2014(LPFExt):
         self.dys = [d.dy.values for d in data]
         self.gp_inputs = [np.transpose([t,dx,dy,am]) for t,dx,dy,am in zip(times,self.dxs,self.dys,self.airmasses)]
 
-        super(LPFExt,self).__init__(times, fluxes, df.passband, constant_k=constant_k, 
+        super().__init__(times, fluxes, df.passband, constant_k=constant_k,
                                     noise=noise, use_ldtk=use_ldtk)
-        
 
 
     def setup_gp(self):
@@ -152,7 +154,7 @@ class LPFTM(CLPF):
     def __init__(self, use_ldtk=False, constant_k=True, noise='white'):
         self.lpt13 = LPFExt('triaud2013',  use_ldtk=False, constant_k=constant_k, noise=noise)
         self.lpm14 = LPFExt('mancini2014', use_ldtk=False, constant_k=constant_k, noise=noise)
-        super(LPFTM,self).__init__([self.lpt13,self.lpm14], use_ldtk=use_ldtk, constant_k=constant_k, noise=noise)
+        super().__init__([self.lpt13, self.lpm14], use_ldtk=use_ldtk, constant_k=constant_k, noise=noise)
         self.ndim = self.ps.ndim
         self.bounds = self.ps.bounds
 
@@ -167,7 +169,7 @@ class LPFRN(CLPF):
         self.lpm14 = LPFExt('mancini2014', use_ldtk=False, constant_k=constant_k, noise='red')
         self.lpf14 = LPFFukui2014(use_ldtk=False, constant_k=constant_k)
 
-        super(LPFRN,self).__init__([self.lpt13,self.lpm14,self.lpf14],
+        super().__init__([self.lpt13,self.lpm14,self.lpf14],
                                    use_ldtk=use_ldtk, constant_k=constant_k, noise='red')
         self.ndim = self.ps.ndim
         self.bounds = self.ps.bounds
@@ -176,8 +178,52 @@ class LPFRN(CLPF):
         return self.lnposterior(pv)
 
 
-
 class GPTime(object):
+    def __init__(self, inputs, flux):
+        self.inputs = array(inputs)
+        self.flux = array(flux)
+        self.wn_estimate = diff(flux).std() / sqrt(2)
+        self.gp = GP(self.kernel, white_noise=log(self.wn_estimate ** 2), fit_white_noise=True)
+        self.gp.compute(self.inputs)
+        self._minres = None
+        self.hp = self.gp.get_parameter_vector()
+        self.names = 'ln_wn_var ln_output_var ln_input_scale'.split()
+
+    def compute(self, pv=None):
+        if pv is not None:
+            self.gp.set_parameter_vector(pv)
+        self.gp.compute(self.inputs)
+
+    def predict(self, pv=None, flux=None):
+        if pv is not None:
+            self.compute(pv)
+        flux = flux if flux is not None else self.flux
+        return self.gp.predict(flux, self.inputs, return_cov=False)
+
+    def lnposterior(self, pv):
+        self.compute(pv)
+        return self.gp.lnlikelihood(self.flux)
+
+    def nll(self, pv):
+        return self.gp.nll(pv, self.flux)
+
+    def grad_nll(self, pv):
+        return self.gp.grad_nll(pv, self.flux)
+
+    def minfun(self, pv):
+        return -self.lnposterior(pv)
+
+    def fit(self, pv0=None, disp=False):
+        self._minres = minimize(self.nll, self.gp.get_parameter_vector(), jac=self.grad_nll)
+        self.hp[:] = self._minres.x.copy()
+        return self.hp
+
+    @property
+    def kernel(self):
+        return (ConstantKernel(log(self.flux.var()), ((-20, -2),))
+                * ExpKernel(0.1, metric_bounds=((-20, 5),)))
+
+class OldGPTime(object):
     def __init__(self, inputs, flux):
         self.inputs = inputs
         self.flux = flux.copy()
@@ -203,7 +249,7 @@ class GPTime(object):
 
     def predict(self, flux=None):
         flux = flux if flux is not None else self.flux
-        return self.gp.predict(flux, self.inputs, mean_only=True)
+        return self.gp.predict(flux, self.inputs, return_cov=False)
 
     def lnposterior(self, pv):
         if any(pv < self.ps.pmins) or any(pv>self.ps.pmaxs):
