@@ -39,7 +39,7 @@ class LogPosteriorFunction(object):
         self.npb = npb = len(self.unique_pbs)
         self._wrk_ld = zeros([self.nlc, 2])
 
-        ldf_path = kwargs.get('ldf_path', 'data/external_lcs.h5')
+        ldf_path = kwargs.get('ldf_path', join(DDATA, 'external_lcs.h5'))
 
         # Basic parameters
         # ----------------
@@ -149,10 +149,10 @@ class LogPosteriorFunction(object):
 
 
 class LPF(LogPosteriorFunction):
-    def __init__(self, times, fluxes, passbands, constant_k=True, noise='white', use_ldtk=False, nthreads=4, **kwargs):
+    def __init__(self, times, fluxes, passbands, constant_k=True, noise='white', use_ldtk=False, nthreads=1, **kwargs):
         """Log-posterior function for a single dataset.
         """
-        super(LPF, self).__init__(passbands, constant_k, noise, use_ldtk, **kwargs)
+        super().__init__(passbands, constant_k, noise, use_ldtk, **kwargs)
         self.tm = MA(interpolate=False, nthr=nthreads)
         self.nt = nthreads
         self.times = times
@@ -206,7 +206,7 @@ class CLPF(LogPosteriorFunction):
     def __init__(self, lpfs, constant_k=True, noise='white', use_ldtk=False):
         """Log-posterior function combining multiple datasets.
         """
-        super(CLPF, self).__init__(concatenate([lpf.passbands for lpf in lpfs]), constant_k, noise, use_ldtk)
+        super().__init__(concatenate([lpf.passbands for lpf in lpfs]), constant_k, noise, use_ldtk)
         self.lpfs = lpfs
 
         sbl = self._sbl

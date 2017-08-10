@@ -2,6 +2,7 @@ from numpy import diff, log
 from scipy.optimize import minimize
 from tqdm import tqdm
 from george.kernels import ConstantKernel, ExpKernel, Matern32Kernel, ExpSquaredKernel
+from george.kernels import ConstantKernel as CK, ExpKernel as EK, ExpSquaredKernel as GK
 
 from .core import *
 from .lpf import *
@@ -102,55 +103,59 @@ class LPFExt(LPF):
 
         self._nbl = 1
         self.dataset = dataset
-        f = pd.HDFStore(join(DDATA, 'external_lcs.h5'), 'r')
-        df = pd.DataFrame([[k]+k.strip('/lc').split('/') for k in f.keys() if 'lc' in k], 
-                          columns='key dataset passband name'.split())
-        df = df[df.dataset == dataset]
-        self.lcs = [f[n] for n in df.key]
-        f.close()
-        times = [s.index.values - TZERO for s in self.lcs] 
-        fluxes = [s.values for s in self.lcs]   
+        with pd.HDFStore(join(DDATA, 'external_lcs.h5'), 'r') as f:
+            df = pd.DataFrame([[k] + k.strip('/lc').split('/') for k in f.keys() if 'lc' in k],
+                              columns='key dataset passband name'.split())
+            df = df[df.dataset == dataset]
+            self.lcs = [f[n] for n in df.key]
+
+        times = [s.index.values - TZERO for s in self.lcs]
+        fluxes = [s.values for s in self.lcs]
         super().__init__(times, fluxes, df.passband, constant_k=constant_k,
-                                    noise=noise, use_ldtk=use_ldtk)
-        
+                         noise=noise, use_ldtk=use_ldtk)
+
     def setup_gp(self):
         self.hps = pd.read_hdf(self.result_file, 'gphp/{:s}'.format(self.dataset))
-        self.gps = [GPTime(t,f) for t,f in zip(self.times, self.fluxes)]
-        [gp.compute(pv) for gp,pv in zip(self.gps, self.hps.values[:,:-1])]
-        
-        
+        self.gps = [GPTime(t, f) for t, f in zip(self.times, self.fluxes)]
+        [gp.compute(pv) for gp, pv in zip(self.gps, self.hps.values[:, :-1])]
+
     def lnlikelihood_rn(self, pv):
         flux_m = self.compute_lc_model(pv)
-        return sum([gp.gp.lnlikelihood(fo-fm) for gp,fo,fm in zip(self.gps,self.fluxes,flux_m)])
+        return sum([gp.gp.lnlikelihood(fo - fm) for gp, fo, fm in zip(self.gps, self.fluxes, flux_m)])
 
 
 class LPFFukui2014(LPFExt):
-    def __init__(self, use_ldtk=False, constant_k=True, noise='red'):
-        self.dataset = 'fukui2014'
-        f = pd.HDFStore(join(DDATA, 'external_lcs.h5'),'r')
-        df = pd.DataFrame([[k]+k.strip('/lc').split('/') for k in f.keys() if 'lc' in k], 
-                          columns='key dataset passband name'.split())
-        df = df[df.dataset == self.dataset]
-        data = [f[n] for n in df.key]
-        f.close()
-        times  = [d.index.values-TZERO for d in data]
-        fluxes = [d.flux.values for d in data]
+    """LPF for the F14 dataset.
+    """
+    def __init__(self, use_ldtk=False, constant_k=True):
+        super().__init__('fukui2014', use_ldtk=use_ldtk, constant_k=constant_k, noise='red')
+
+        with pd.HDFStore(join(DDATA, 'external_lcs.h5'), 'r') as f:
+            df = pd.DataFrame([[k] + k.strip('/lc').split('/') for k in f.keys() if 'lc' in k],
+                              columns='key dataset passband name'.split())
+            df = df[df.dataset == self.dataset]
+            data = [f[n] for n in df.key]
+
+        self.times = [d.index.values - TZERO for d in data]
+        self.fluxes = [d.flux.values for d in data]
         self.airmasses = [d.airmass.values for d in data]
         self.dxs = [d.dx.values for d in data]
         self.dys = [d.dy.values for d in data]
-        self.gp_inputs = [np.transpose([t,dx,dy,am]) for t,dx,dy,am in zip(times,self.dxs,self.dys,self.airmasses)]
-
-        super().__init__(times, fluxes, df.passband, constant_k=constant_k,
-                                    noise=noise, use_ldtk=use_ldtk)
-
+        self.gp_inputs = [np.transpose([t, dx, dy, am]) for t, dx, dy, am in
+                          zip(self.times, self.dxs, self.dys, self.airmasses)]
 
     def setup_gp(self):
-        self.hps = pd.read_hdf(self.result_file, 'gphp/fukui2014')
-        self.gps = [GPF14(i,f) for i,f in zip(self.gp_inputs, self.fluxes)]
-        [gp.compute(pv) for gp,pv in zip(self.gps, self.hps.values[:,:-1])]
+        try:
+            self.hps = pd.read_hdf(RFILE_EXT, 'gphp/fukui2014')
+            self.gps = [GPF14(i,f) for i,f in zip(self.gp_inputs, self.fluxes)]
+            [gp.compute(pv) for gp,pv in zip(self.gps, self.hps.values)]
+        except:
+            pass
 
 
 class LPFTM(CLPF):
+    """Composite LPF combining the T13 and M14 datasets.
+    """
     def __init__(self, use_ldtk=False, constant_k=True, noise='white'):
         self.lpt13 = LPFExt('triaud2013',  use_ldtk=False, constant_k=constant_k, noise=noise)
         self.lpm14 = LPFExt('mancini2014', use_ldtk=False, constant_k=constant_k, noise=noise)
@@ -164,6 +169,8 @@ class LPFTM(CLPF):
 
 
 class LPFRN(CLPF):
+    """Composite LPF combining all the three datasets.
+    """
     def __init__(self, use_ldtk=False, constant_k=True):
         self.lpt13 = LPFExt('triaud2013',  use_ldtk=False, constant_k=constant_k, noise='red')
         self.lpm14 = LPFExt('mancini2014', use_ldtk=False, constant_k=constant_k, noise='red')
@@ -220,87 +227,18 @@ class GPTime(object):
 
     @property
     def kernel(self):
-        return (ConstantKernel(log(self.flux.var()), ((-20, -2),))
-                * ExpKernel(0.1, metric_bounds=((-20, 5),)))
-
-class OldGPTime(object):
-    def __init__(self, inputs, flux):
-        self.inputs = inputs
-        self.flux = flux.copy()
-        self.gp = GP(self.kernel)
-        self.pv_mapped = zeros(3)
-        self.names = 'log10_amplitude inverse_time_scale log10_white_noise'.split()
-
-        self.priors = [UP(-4.5,  -2, 'log_ta'), ##  0  - log10 time amplitude
-                       UP( 5e-2, 5e5,    'its'), ##  1  - inverse time scale
-                       UP(-4.0,  -2, 'log_wn')] ##  2  - log10 white noise
-        self.ps = PriorSet(self.priors)
-
-
-    def map(self, pv):
-        self.pv_mapped[0] = (10**pv[0])**2
-        self.pv_mapped[1] = 1./pv[1]
-        self.pv_mapped[2] = 10**pv[2]
-
-    def compute(self, pv):
-        self.map(pv)
-        self.gp.kernel[:] = np.log(self.pv_mapped[:-1])
-        self.gp.compute(self.inputs, self.pv_mapped[-1])
-
-    def predict(self, flux=None):
-        flux = flux if flux is not None else self.flux
-        return self.gp.predict(flux, self.inputs, return_cov=False)
-
-    def lnposterior(self, pv):
-        if any(pv < self.ps.pmins) or any(pv>self.ps.pmaxs):
-            return -inf
-        self.compute(pv)
-        return self.ps.c_log_prior(pv) + self.gp.lnlikelihood(self.flux)
-
-    def minfun(self, pv):
-        return -self.lnposterior(pv)
-
-    def fit(self, pv0=None, disp=False):
-        pv0 = pv0 if pv0 is not None else [np.log10(self.flux.std()), 1000, np.log10(self.flux.std())]
-        return fmin(self.minfun, pv0, xtol=1e-6, disp=disp)
-
-    @property
-    def kernel(self):
-        return 1e-6*ExpKernel(1)
+        return CK(log(self.flux.var()), ndim=1, axes=0) * EK(0.1, ndim=1, axes=0)
 
 
 class GPF14(GPTime):
     def __init__(self, inputs, flux):
-        super(GPF14, self).__init__(inputs, flux)
-        self.pv_mapped = zeros(8)
-        self.names = ('log10_time_amplitude inverse_time_scale log10_xy_amplitude '
-                      'inverse_x_scale inverse_y_scale log10_airmass_amplitude '
-                      'inverse_airmass_scale white_noise').split()
-
-        self.priors = [UP(  -3.5,     -2,   'ta'),  ##  0  - log10 time amplitude
-                       UP(     5,     20,  'its'),  ##  1  - inverse time scale
-                       UP(  -3.5,     -2,   'pa'),  ##  2  - log10 xy amplitude
-                       UP(     1,     50,  'ixs'),  ##  3  - inverse x scale
-                       UP(     1,     50,  'iys'),  ##  4  - inverse y scale
-                       UP(  -3.5,     -1,   'aa'),  ##  5  - log10 airmass amplitude
-                       UP(     1,     50,  'ias'),  ##  6  - inverse airmass scale
-                       UP(    -4,     -2,   'wn')]  ##  7  - log10 white noise
-        self.ps = PriorSet(self.priors)
-
+        super().__init__(inputs, flux)
+        self.names = ('ln_wn_var ln_tvar ln_tscale ln_xyvar '
+                      'ln_xscale ln_yscale ln_amvar ln_amscale').split()
 
     @property
     def kernel(self):
-        return (  1*ExpKernel(0.1,ndim=4,dim=0)
-                 +1*ExpSquaredKernel(0.1,ndim=4,dim=1)*ExpSquaredKernel(0.1,ndim=4,dim=2)
-                 +1*ExpSquaredKernel(0.1,ndim=4,dim=3))
-
-
-    def map(self, pv):
-        self.pv_mapped[0] = (10**pv[0])**2
-        self.pv_mapped[1] = 1./pv[1]
-        self.pv_mapped[2] = (10**pv[2])**2
-        self.pv_mapped[3] = 1./pv[3]
-        self.pv_mapped[4] = 1./pv[4]
-        self.pv_mapped[5] = (10**pv[5])**2
-        self.pv_mapped[6] = 1./pv[6]
-        self.pv_mapped[7] = 10**pv[7]
+        fv = self.flux.var()
+        return ( CK(fv, ndim=4, axes=0)     * EK(0.1, ndim=4, axes=0)
+               + CK(fv, ndim=4, axes=[1,2]) * GK(0.1, ndim=4, axes=1)*GK(0.1, ndim=4, axes=2)
+               + CK(fv, ndim=4, axes=3)     * GK(0.1, ndim=4, axes=3))
