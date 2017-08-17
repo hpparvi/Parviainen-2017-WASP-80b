@@ -1,22 +1,27 @@
 from numpy import diff, log
 from scipy.optimize import minimize
 from tqdm import tqdm
-from george.kernels import ConstantKernel, ExpKernel, Matern32Kernel, ExpSquaredKernel
 from george.kernels import ConstantKernel as CK, ExpKernel as EK, ExpSquaredKernel as GK
 
 from .core import *
 from .lpf import *
 
 class Sampler(object):
-    def __init__(self, result_file, run_name, lpf, npop, niter_de, niter_mc):
+    def __init__(self, result_file, run_name, lpf, lnp, npop, niter_de, niter_mc, thin_mc, pool=None):
         self.result_file = result_file
         self.run_name = run_name
         self.lpf = lpf
+        self.lnp = lnp
         self.niter_de = niter_de
         self.niter_mc = niter_mc
-        self.de = DiffEvol(lpf, lpf.bounds, npop, maximize=True, F=0.25, C=0.1)
-        self.sampler = EnsembleSampler(npop, lpf.ndim, lpf)
+        self.mc_thin = thin_mc
+        self.pool = pool
+        self.de = DiffEvol(lnp, lpf.bounds, npop, maximize=True, fbounds=[0.15,0.55], cbounds=[0.1,0.9], pool=pool)
+        self.sampler = EnsembleSampler(npop, lpf.ndim, lnp, pool=pool)
 
+        self.logger = logging.getLogger()
+        self.info = self.logger.info
+        self.error = self.logger.error
 
     def optimise(self, niter=None):
         niter = niter or self.niter_de
@@ -33,8 +38,8 @@ class Sampler(object):
     def sample(self, niter=None):
         niter = niter or self.niter_mc
         def save_chains():
-            fc = self.sampler.chain[:,min(2000,self.sampler.iterations//2):self.sampler.iterations:100,:].reshape([-1,self.lpf.ndim])
-            dfmc = pd.DataFrame(self.sampler.chain[:,self.sampler.iterations-1,:], columns=self.lpf.ps.names)
+            fc = self.sampler.chain[:,:self.sampler.iterations//self.mc_thin,:].reshape([-1,self.lpf.ndim])
+            dfmc = pd.DataFrame(self.sampler.chain[:,max(0, self.sampler.iterations//self.mc_thin-1),:], columns=self.lpf.ps.names)
             dffc = pd.DataFrame(fc, columns=self.lpf.ps.names)
             dfmc.to_hdf(self.result_file,'{:s}/mc'.format(self.run_name))
             dffc.to_hdf(self.result_file,'{:s}/fc'.format(self.run_name))
@@ -45,8 +50,8 @@ class Sampler(object):
             pv0 = self.sampler.chain[:,-1,:].copy()
 
         try:
-            for i,c in tqdm(enumerate(self.sampler.sample(pv0, iterations=niter)), total=niter):
-                if ((i+1)%200 == 0) or (i==niter-1):
+            for i,c in tqdm(enumerate(self.sampler.sample(pv0, iterations=niter, thin=self.mc_thin)), total=niter):
+                if (i+1)%200 == 0:
                     save_chains()
         except KeyboardInterrupt:
             pass
@@ -103,7 +108,7 @@ class LPFExt(LPF):
 
         self._nbl = 1
         self.dataset = dataset
-        with pd.HDFStore(join(DDATA, 'external_lcs.h5'), 'r') as f:
+        with pd.HDFStore(DFILE_EXT, 'r') as f:
             df = pd.DataFrame([[k] + k.strip('/lc').split('/') for k in f.keys() if 'lc' in k],
                               columns='key dataset passband name'.split())
             df = df[df.dataset == dataset]
@@ -115,9 +120,9 @@ class LPFExt(LPF):
                          noise=noise, use_ldtk=use_ldtk)
 
     def setup_gp(self):
-        self.hps = pd.read_hdf(self.result_file, 'gphp/{:s}'.format(self.dataset))
+        self.hps = pd.read_hdf(RFILE_EXT, 'gphp/{:s}'.format(self.dataset))
         self.gps = [GPTime(t, f) for t, f in zip(self.times, self.fluxes)]
-        [gp.compute(pv) for gp, pv in zip(self.gps, self.hps.values[:, :-1])]
+        [gp.compute(pv) for gp, pv in zip(self.gps, self.hps.values[:,:-1])]
 
     def lnlikelihood_rn(self, pv):
         flux_m = self.compute_lc_model(pv)
@@ -129,8 +134,7 @@ class LPFFukui2014(LPFExt):
     """
     def __init__(self, use_ldtk=False, constant_k=True):
         super().__init__('fukui2014', use_ldtk=use_ldtk, constant_k=constant_k, noise='red')
-
-        with pd.HDFStore(join(DDATA, 'external_lcs.h5'), 'r') as f:
+        with pd.HDFStore(DFILE_EXT, 'r') as f:
             df = pd.DataFrame([[k] + k.strip('/lc').split('/') for k in f.keys() if 'lc' in k],
                               columns='key dataset passband name'.split())
             df = df[df.dataset == self.dataset]
@@ -143,12 +147,13 @@ class LPFFukui2014(LPFExt):
         self.dys = [d.dy.values for d in data]
         self.gp_inputs = [np.transpose([t, dx, dy, am]) for t, dx, dy, am in
                           zip(self.times, self.dxs, self.dys, self.airmasses)]
+        self.setup_gp()
 
     def setup_gp(self):
         try:
             self.hps = pd.read_hdf(RFILE_EXT, 'gphp/fukui2014')
             self.gps = [GPF14(i,f) for i,f in zip(self.gp_inputs, self.fluxes)]
-            [gp.compute(pv) for gp,pv in zip(self.gps, self.hps.values)]
+            [gp.compute(pv) for gp,pv in zip(self.gps, self.hps.values[:,:-1])]
         except:
             pass
 

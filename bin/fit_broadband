@@ -1,0 +1,50 @@
+#!/usr/bin/env python
+import sys
+from argparse import ArgumentParser
+from emcee.utils import MPIPool
+
+sys.path.append('..')
+from src.extcore import *
+
+if __name__ == '__main__':
+    ap = ArgumentParser()
+    ap.add_argument('run_name', choices='ckwn vkwn ckrn vkrn'.split())
+    ap.add_argument('--use-ldtk', action='store_true', default=False)
+    ap.add_argument('--n-walkers', type=int, default=150)
+    ap.add_argument('--n-threads', type=int, default=1)
+    ap.add_argument('--de-n-iterations', type=int, default=200)
+    ap.add_argument('--mc-n-iterations', type=int, default=10000)
+    ap.add_argument('--mc-thin', type=int, default=50)
+    args = ap.parse_args()
+
+    rname = '{}{}'.format(args.run_name, '_ldtk' if args.use_ldtk else '')
+
+    if 'wn' in args.run_name:
+        lpf = LPFTM(use_ldtk=args.use_ldtk, constant_k=('ck' in args.run_name), noise='white')
+    else:
+        lpf = LPFRN(use_ldtk=args.use_ldtk, constant_k=('ck' in args.run_name))
+
+    def lnposterior(pv):
+        return lpf.lnposterior(pv)
+
+    pool = MPIPool()
+    if not pool.is_master():
+        pool.wait()
+        sys.exit(0)
+
+    sampler = Sampler(RFILE_EXT, rname, lpf, lnposterior, args.n_walkers, args.de_n_iterations,
+                      args.mc_n_iterations, args.mc_thin, pool=pool)
+
+    sampler.info('Saving results to %s', relpath(RFILE_EXT))
+    sampler.info('Run name %s', rname)
+    sampler.info('Population size %i', args.n_walkers)
+
+    if 'ckrn' in args.run_name:
+        sampler.de._population[:, :lpf._sbl] = pd.read_hdf(RFILE_EXT, 'ckwn/mc').values[:, :lpf._sbl]
+    elif 'vkrn' in args.run_name:
+        sampler.de._population[:, :lpf._sbl] = pd.read_hdf(RFILE_EXT, 'vkwn/mc').values[:, :lpf._sbl]
+    else:
+        sampler.optimise()
+    sampler.sample()
+
+    pool.close()
