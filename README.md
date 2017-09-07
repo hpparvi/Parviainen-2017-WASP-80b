@@ -6,6 +6,11 @@ These repository contains the code, data, and notebooks that cover the broadband
 
 **NOTE: We are currently reorganising and cleaning up the code. This will hopefully not take too long, but a lot of things may be broken at the moment.**
 
+**Cleanup status 7.9.2017** 
+
+ - **Broadband analysis has been cleaned and revised to work with george 0.3.** 
+ - **The GTC transmission spectroscopy notebooks are still a mess, and the code uses george 0.2.**
+
 ## Introduction
 
 The `notebooks` directory contains the IPython notebooks going through the analyses step by step, the `src` directory contains the code for the analysis, and the `bin` directory contains executable scripts.
